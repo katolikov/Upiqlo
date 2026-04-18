@@ -42,7 +42,9 @@ interface ViewportStore {
 export const IDENTITY: Transform = { scale: 1, tx: 0, ty: 0 };
 
 function clampScale(s: number): number {
-  return Math.max(0.1, Math.min(16, s));
+  // Up to 64× — enough to inspect individual pixels of a 4K image
+  // inside a reasonably sized pane.
+  return Math.max(0.1, Math.min(64, s));
 }
 
 export const useViewport = create<ViewportStore>((set, getState) => ({

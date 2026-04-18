@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileImage, Play, XCircle } from "lucide-react";
+import { FileImage, Play, RotateCw, XCircle } from "lucide-react";
 import { heatmapDataUrl, scanFolders } from "@/lib/api";
 import { streamCompare } from "@/lib/stream";
 import { resolveImageSrc } from "@/lib/assets";
@@ -313,23 +313,58 @@ export function FolderCompareMode({ session }: Props) {
     [session.scan],
   );
 
-  const runButton = running ? (
-    <button
-      type="button"
-      onClick={cancelPair}
-      className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20 transition-colors"
-    >
-      <XCircle size={13} /> Cancel
-    </button>
-  ) : (
-    <button
-      type="button"
-      disabled={!canRun}
-      onClick={runPair}
-      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed transition-colors"
-    >
-      <Play size={13} /> Run
-    </button>
+  const [reloadNonce, setReloadNonce] = useState(0);
+  useEffect(() => {
+    if (reloadNonce === 0) return;
+    let cancelled = false;
+    Promise.all([
+      resolveImageSrc(session.activeReferencePath),
+      resolveImageSrc(session.activeTargetPath),
+    ]).then(([r, t]) => {
+      if (cancelled) return;
+      setRefSrc(r ? `${r}${r.includes("?") ? "&" : "?"}_r=${reloadNonce}` : null);
+      setTgtSrc(t ? `${t}${t.includes("?") ? "&" : "?"}_r=${reloadNonce}` : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadNonce, session.activeReferencePath, session.activeTargetPath]);
+
+  const reload = useCallback(() => {
+    setReloadNonce(Date.now());
+    if (session.activeReferencePath && session.activeTargetPath && !running) runPair();
+  }, [runPair, running, session.activeReferencePath, session.activeTargetPath]);
+
+  const actionCluster = (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={reload}
+        disabled={!session.activeReferencePath || !session.activeTargetPath || running}
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-surface-border text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed text-[12px] transition-colors"
+        title="Reload input images and re-run this pair"
+      >
+        <RotateCw size={12} /> Reload
+      </button>
+      {running ? (
+        <button
+          type="button"
+          onClick={cancelPair}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20 transition-colors"
+        >
+          <XCircle size={13} /> Cancel
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={!canRun}
+          onClick={runPair}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed transition-colors"
+        >
+          <Play size={13} /> Run
+        </button>
+      )}
+    </div>
   );
 
   return (
@@ -338,13 +373,13 @@ export function FolderCompareMode({ session }: Props) {
         sessionId={session.id}
         params={session.params}
         activePaths={[session.activeReferencePath, session.activeTargetPath]}
-        action={runButton}
+        action={actionCluster}
       />
 
       <SessionHeader
         kind="directory"
-        leftLabel="Left · Folder"
-        rightLabel="Right · Folder"
+        leftLabel="L"
+        rightLabel="R"
         leftValue={session.referenceDir}
         onCommitLeft={onCommitADir}
         rightValue={session.targetDir}
@@ -378,7 +413,7 @@ export function FolderCompareMode({ session }: Props) {
           <ImageCanvas
             sessionId={session.id}
             src={refSrc}
-            label="Left · Reference"
+            label="L"
             placeholder="Pick a file in Folder A on the left"
             boxes={annotations}
             onDeleteBox={onDeleteBox}
@@ -423,7 +458,7 @@ export function FolderCompareMode({ session }: Props) {
           <ImageCanvas
             sessionId={session.id}
             src={tgtSrc}
-            label="Right · Target"
+            label="R"
             placeholder="Pick a file in Folder B on the right"
             boxes={annotations}
             onDeleteBox={onDeleteBox}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Play, XCircle } from "lucide-react";
+import { Play, RotateCw, XCircle } from "lucide-react";
 import { streamCompare } from "@/lib/stream";
 import { heatmapDataUrl } from "@/lib/api";
 import { resolveImageSrc } from "@/lib/assets";
@@ -278,23 +278,61 @@ export function SingleCompareMode({ session }: Props) {
     void renameSession;
   }, [renameSession]);
 
-  const runButton = running ? (
-    <button
-      type="button"
-      onClick={cancel}
-      className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20 transition-colors"
-    >
-      <XCircle size={13} /> Cancel
-    </button>
-  ) : (
-    <button
-      type="button"
-      disabled={!canRun}
-      onClick={run}
-      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed transition-colors"
-    >
-      <Play size={13} /> Run
-    </button>
+  // Reload: force re-fetch of input images (cache-buster) and re-run if
+  // we already have a valid pair. A brand-new timestamp on the resolved
+  // src triggers <img> reload even if the path didn't change.
+  const [reloadNonce, setReloadNonce] = useState(0);
+  useEffect(() => {
+    if (reloadNonce === 0) return;
+    let cancelled = false;
+    Promise.all([
+      resolveImageSrc(session.referencePath),
+      resolveImageSrc(session.targetPath),
+    ]).then(([r, t]) => {
+      if (cancelled) return;
+      setRefSrc(r ? `${r}${r.includes("?") ? "&" : "?"}_r=${reloadNonce}` : null);
+      setTgtSrc(t ? `${t}${t.includes("?") ? "&" : "?"}_r=${reloadNonce}` : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadNonce, session.referencePath, session.targetPath]);
+
+  const reload = useCallback(() => {
+    setReloadNonce(Date.now());
+    if (session.referencePath && session.targetPath && !running) run();
+  }, [run, running, session.referencePath, session.targetPath]);
+
+  const actionCluster = (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={reload}
+        disabled={!session.referencePath || !session.targetPath || running}
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-surface-border text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed text-[12px] transition-colors"
+        title="Reload input images and re-run"
+      >
+        <RotateCw size={12} /> Reload
+      </button>
+      {running ? (
+        <button
+          type="button"
+          onClick={cancel}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20 transition-colors"
+        >
+          <XCircle size={13} /> Cancel
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={!canRun}
+          onClick={run}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed transition-colors"
+        >
+          <Play size={13} /> Run
+        </button>
+      )}
+    </div>
   );
 
   return (
@@ -303,13 +341,13 @@ export function SingleCompareMode({ session }: Props) {
         sessionId={session.id}
         params={session.params}
         activePaths={[session.referencePath, session.targetPath]}
-        action={runButton}
+        action={actionCluster}
       />
 
       <SessionHeader
         kind="file"
-        leftLabel="Left · Reference"
-        rightLabel="Right · Target"
+        leftLabel="L"
+        rightLabel="R"
         leftValue={session.referencePath}
         onCommitLeft={onCommitA}
         rightValue={session.targetPath}
@@ -330,7 +368,7 @@ export function SingleCompareMode({ session }: Props) {
           <ImageCanvas
             sessionId={session.id}
             src={refSrc}
-            label="Left · Reference"
+            label="L"
             placeholder="Paste a path above, drag an image here, or click the folder icon"
             boxes={session.annotations}
             onDeleteBox={onDeleteBox}
@@ -376,7 +414,7 @@ export function SingleCompareMode({ session }: Props) {
           <ImageCanvas
             sessionId={session.id}
             src={tgtSrc}
-            label="Right · Target"
+            label="R"
             placeholder="Paste a path above, drag an image here, or click the folder icon"
             boxes={session.annotations}
             onDeleteBox={onDeleteBox}

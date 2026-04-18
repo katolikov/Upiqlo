@@ -10,6 +10,10 @@
     "shell:default",
     "shell:allow-execute",
     "shell:allow-spawn",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [{ "url": "https://**" }, { "url": "http://**" }]
+    },
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",

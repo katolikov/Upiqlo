@@ -1,11 +1,31 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { ExternalLink, Laptop, Moon, Sun, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, type ThemeMode } from "@/state/theme";
+import { isTauri } from "@/lib/assets";
 
 interface Props {
   open: boolean;
   onClose: () => void;
+}
+
+/**
+ * Open a URL in the user's default browser. Inside Tauri the webview
+ * would otherwise try to navigate to the URL itself; the shell plugin's
+ * `open()` hands it off to the OS. Falls back to `window.open` outside
+ * Tauri (e.g. the plain-browser dev session).
+ */
+async function openExternal(url: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      const mod = await import("@tauri-apps/plugin-shell");
+      await mod.open(url);
+      return;
+    } catch (err) {
+      console.warn("shell.open failed, falling back to window.open", err);
+    }
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 /** Centered modal with theme picker + About section. */
@@ -82,7 +102,7 @@ export function SettingsModal({ open, onClose }: Props) {
             <div className="rounded-md border border-surface-border bg-surface p-3 text-[12px] text-text-muted space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <span className="text-text font-medium">Upiqlo</span>
-                <span className="tabular-nums">v0.5.0</span>
+                <span className="tabular-nums">v0.5.1</span>
               </div>
               <div>
                 Cross-platform native FR-IQA viewer built around the UPIQAL
@@ -98,11 +118,11 @@ export function SettingsModal({ open, onClose }: Props) {
             <div className="flex flex-col gap-1.5 text-[12px]">
               <InfoLink
                 label="GitHub repository"
-                href="https://github.com/katolikov/Upiqlo"
+                href="https://github.com/katolikov/FR-IQA-Algo"
               />
               <InfoLink
-                label="License (TBD)"
-                href="https://github.com/katolikov/Upiqlo/blob/main/LICENSE"
+                label="License"
+                href="https://github.com/katolikov/FR-IQA-Algo/blob/main/LICENSE"
               />
               <div className="flex items-center justify-between px-2.5 py-1.5 rounded border border-surface-border bg-surface text-text-muted">
                 <span>Check for Updates</span>
@@ -152,12 +172,18 @@ function ThemeCard({
 }
 
 function InfoLink({ label, href }: { label: string; href: string }) {
+  const onClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      void openExternal(href);
+    },
+    [href],
+  );
   return (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center justify-between px-2.5 py-1.5 rounded border border-surface-border bg-surface hover:bg-surface-hover text-text-muted hover:text-text"
+      onClick={onClick}
+      className="flex items-center justify-between px-2.5 py-1.5 rounded border border-surface-border bg-surface hover:bg-surface-hover text-text-muted hover:text-text cursor-pointer"
     >
       <span>{label}</span>
       <ExternalLink size={11} className="text-text-faint" />

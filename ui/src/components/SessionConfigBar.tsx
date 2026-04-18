@@ -43,12 +43,6 @@ export function SessionConfigBar({ sessionId, params, activePaths, action }: Pro
   return (
     <div className="border-b border-surface-border bg-surface-raised shrink-0">
       <div className="h-10 flex items-center px-3 gap-3 text-[12px] overflow-x-auto">
-        <span
-          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent shrink-0"
-          title="Per-tab parameters — each session has its own snapshot"
-        >
-          tab params
-        </span>
         <Slider
           label="Max side"
           value={params.maxSide}

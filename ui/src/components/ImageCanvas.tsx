@@ -10,31 +10,24 @@ import {
 } from "@/lib/viewport-math";
 import { useViewport } from "@/state/viewport";
 import type { BoundingBox } from "@/state/sessions";
+import { toast } from "@/state/toast";
 
 /**
  * Universal image pane.
  *
- * Container size is fixed by its parent (flex column); zooming never
- * resizes the container — only the image inside transforms. Annotations
- * live in normalised [0, 1] image coordinates so they stay anchored to
- * their pixels during pan / zoom.
- *
- * Controls
- * --------
- *   Left-click + drag  → pan
- *   Scroll wheel       → zoom anchored at cursor
- *   Right-click + drag → draw a bounding box (drawable=true only)
- *   Double-click       → reset to fit
- *   +/− buttons        → zoom anchored at container centre
- *   Scrollbar drag     → pan via UI thumb
- *   OS drag-and-drop   → loads the file when onDropPath is provided
+ * Container size is fixed by its parent; zooming never resizes the
+ * container — only the image inside transforms. The image renders at
+ * its natural width/height and is visually scaled with CSS transform
+ * so the browser does not re-sample pixels every zoom tick (stable +
+ * GPU-accelerated). Annotations live in normalised [0, 1] image
+ * coordinates so they stay anchored to their pixels during pan / zoom.
  */
 export interface ImageCanvasProps {
   sessionId: string;
   src: string | null;
   label?: string;
   /** Replaces the default label chip with a custom element (used for the
-   * Output pane's merged dropdown-title). */
+   * Output pane's merged dropdown/title). */
   headerSlot?: React.ReactNode;
   placeholder?: string;
   className?: string;
@@ -93,6 +86,11 @@ export function ImageCanvas({
   const [hoverDrop, setHoverDrop] = useState(false);
   const [hoverPx, setHoverPx] = useState<{ x: number; y: number } | null>(null);
 
+  // Monotonic src generation — stale img.onload events (from a previous
+  // src that was replaced mid-flight) are ignored. Prevents rapid layer
+  // clicks from flashing an error/"Loading…" state.
+  const srcGenRef = useRef(0);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -111,14 +109,20 @@ export function ImageCanvas({
     return imageBox(natural.w, natural.h, cont.w, cont.h, transform);
   }, [natural, cont, transform]);
 
-  const onImgLoad = useCallback(() => {
-    if (imgRef.current) {
-      setNatural({ w: imgRef.current.naturalWidth, h: imgRef.current.naturalHeight });
-    }
-  }, []);
+  const onImgLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      const gen = Number((e.currentTarget as HTMLImageElement).dataset.gen ?? "0");
+      if (gen !== srcGenRef.current) return; // stale load, ignore
+      if (imgRef.current) {
+        setNatural({ w: imgRef.current.naturalWidth, h: imgRef.current.naturalHeight });
+      }
+    },
+    [],
+  );
 
   // Clear natural size when src changes so a new image reloads cleanly.
   useEffect(() => {
+    srcGenRef.current += 1;
     setNatural(null);
     setHoverPx(null);
   }, [src]);
@@ -131,12 +135,16 @@ export function ImageCanvas({
       if (!rect) return;
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
-      const factor = Math.pow(1.0015, -e.deltaY);
+      // Mild step per wheel tick; deltaMode 0 is pixels, 1 is lines, 2 is pages.
+      const deltaY = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      const factor = Math.pow(1.0015, -deltaY);
       zoomAt(sessionId, factor, cx, cy, rect.width, rect.height);
     },
     [sessionId, zoomAt],
   );
 
+  // Pin the wheel event with passive=false so preventDefault stops the
+  // webview from scrolling the outer container.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -265,35 +273,73 @@ export function ImageCanvas({
   );
 
   // --- Save -----------------------------------------------------------
+  //
+  // Canvas security: image <img src=…> from Tauri's asset:// protocol
+  // is cross-origin to the webview, and without CORS headers a canvas
+  // that has drawImage()'d it becomes "tainted" — toBlob() throws.
+  //
+  // Workaround: fetch() the URL (works for asset://, data:, blob: and
+  // http(s)://localhost), turn the bytes into a Blob, load that via a
+  // blob: URL (same-origin) and draw *that*. Only annotations drawn on
+  // top of the bytes are ever composited, so nothing leaks.
   const handleSave = useCallback(async () => {
-    if (!src || !natural || !onSave) return;
-    const image = new window.Image();
-    image.crossOrigin = "anonymous";
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("image load failed"));
-      image.src = src;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(image, 0, 0);
-    ctx.lineWidth = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) / 400));
-    for (const b of boxes) {
-      ctx.strokeStyle = b.color;
-      ctx.strokeRect(b.x * canvas.width, b.y * canvas.height, b.w * canvas.width, b.h * canvas.height);
-      if (b.label) {
-        ctx.fillStyle = b.color;
-        ctx.font = `${Math.max(10, Math.round(canvas.height / 60))}px sans-serif`;
-        ctx.fillText(b.label, b.x * canvas.width + 4, b.y * canvas.height + 14);
+    if (!src || !onSave) return;
+    try {
+      const blobIn = await fetch(src).then((r) => {
+        if (!r.ok) throw new Error(`fetch ${r.status}`);
+        return r.blob();
+      });
+      const objectUrl = URL.createObjectURL(blobIn);
+      try {
+        const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new window.Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error("image load failed"));
+          img.src = objectUrl;
+        });
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("2d context unavailable");
+        ctx.drawImage(image, 0, 0);
+        // Draw each annotation: white halo under coloured stroke for
+        // contrast on busy backgrounds, then optional label.
+        const stroke = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) / 400));
+        for (const b of boxes) {
+          const rx = b.x * canvas.width;
+          const ry = b.y * canvas.height;
+          const rw = b.w * canvas.width;
+          const rh = b.h * canvas.height;
+          ctx.lineWidth = stroke + 2;
+          ctx.strokeStyle = "rgba(255,255,255,0.85)";
+          ctx.strokeRect(rx, ry, rw, rh);
+          ctx.lineWidth = stroke;
+          ctx.strokeStyle = b.color;
+          ctx.strokeRect(rx, ry, rw, rh);
+          if (b.label) {
+            const fontPx = Math.max(12, Math.round(canvas.height / 60));
+            ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
+            ctx.fillStyle = "rgba(0,0,0,0.55)";
+            ctx.fillRect(rx, ry, ctx.measureText(b.label).width + 10, fontPx + 6);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(b.label, rx + 5, ry + fontPx);
+          }
+        }
+        const outBlob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((b) => resolve(b), "image/png"),
+        );
+        if (!outBlob) throw new Error("toBlob returned null");
+        onSave(outBlob, `${saveFilenameBase}.png`);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("save failed", err);
+      toast("error", `Save failed: ${msg}`);
     }
-    canvas.toBlob((blob) => {
-      if (blob) onSave(blob, `${saveFilenameBase}.png`);
-    }, "image/png");
-  }, [boxes, natural, onSave, saveFilenameBase, src]);
+  }, [boxes, onSave, saveFilenameBase, src]);
 
   // --- Scrollbars -----------------------------------------------------
   const hasHScroll = !!box && box.w > cont.w + 0.5;
@@ -334,12 +380,16 @@ export function ImageCanvas({
     [box, cont.h, cont.w, hasVScroll, natural, sessionId, setTransform, transform],
   );
 
-  const imgStyle = box
+  // Use CSS transform translate+scale so the browser GPU-scales the
+  // texture without re-sampling per frame → much more stable zoom.
+  const scaleFactor = natural && box ? box.w / natural.w : 1;
+  const imgStyle: React.CSSProperties = box && natural
     ? {
-        transform: `translate(${box.x}px, ${box.y}px)`,
-        width: `${box.w}px`,
-        height: `${box.h}px`,
-        imageRendering: "pixelated" as const,
+        transform: `translate(${box.x}px, ${box.y}px) scale(${scaleFactor})`,
+        transformOrigin: "0 0",
+        width: `${natural.w}px`,
+        height: `${natural.h}px`,
+        imageRendering: scaleFactor >= 2 ? "pixelated" : "auto",
       }
     : { display: "none" };
 
@@ -436,7 +486,11 @@ export function ImageCanvas({
           src={src}
           alt={label ?? ""}
           draggable={false}
+          data-gen={srcGenRef.current}
           onLoad={onImgLoad}
+          onError={() => {
+            /* ignore — natural will remain null and the "Loading…" state shows */
+          }}
           className="absolute top-0 left-0 pointer-events-none"
           style={imgStyle}
         />
@@ -446,21 +500,41 @@ export function ImageCanvas({
         </div>
       )}
 
+      {/* Rectangle overlay rendered ON TOP of the image (z-30) so it
+          stays legible when the unified/heatmap layer is active. Each
+          rect gets a white halo stroke beneath the coloured stroke for
+          contrast, and an always-visible colour chip + label. */}
       {box && boxes.length > 0 && (
         <svg
-          className="absolute top-0 left-0 w-full h-full pointer-events-none z-10"
+          className="absolute top-0 left-0 w-full h-full z-30"
           viewBox={`0 0 ${cont.w} ${cont.h}`}
           preserveAspectRatio="none"
+          style={{ pointerEvents: "none" }}
         >
-          {boxes.map((b) => {
+          {boxes.map((b, i) => {
             const tl = normalizedToPane(b.x, b.y, box);
             const br = normalizedToPane(b.x + b.w, b.y + b.h, box);
             const rx = Math.min(tl.x, br.x);
             const ry = Math.min(tl.y, br.y);
             const rw = Math.abs(br.x - tl.x);
             const rh = Math.abs(br.y - tl.y);
+            const labelText = b.label ?? `Region ${i + 1}`;
+            // Label chip sits just above the rect if there's room, else
+            // tucked inside its top-left corner.
+            const chipAboveY = ry - 16 >= 2 ? ry - 4 : ry + 14;
+            const chipX = rx + 4;
             return (
-              <g key={b.id} className={onDeleteBox ? "pointer-events-auto cursor-pointer" : ""}>
+              <g key={b.id}>
+                {/* Halo (white) under the coloured stroke. */}
+                <rect
+                  x={rx}
+                  y={ry}
+                  width={rw}
+                  height={rh}
+                  fill="none"
+                  stroke="rgba(255,255,255,0.9)"
+                  strokeWidth={4.5}
+                />
                 <rect
                   x={rx}
                   y={ry}
@@ -470,19 +544,29 @@ export function ImageCanvas({
                   stroke={b.color}
                   strokeWidth={2.5}
                   onClick={(e) => { e.stopPropagation(); if (onDeleteBox) onDeleteBox(b.id); }}
+                  style={{ pointerEvents: onDeleteBox ? "auto" : "none", cursor: onDeleteBox ? "pointer" : "default" }}
                 />
-                {b.label && (
-                  <text
-                    x={rx + 4}
-                    y={ry + 12}
-                    fill={b.color}
-                    fontSize="11"
-                    fontFamily="system-ui, sans-serif"
-                    style={{ paintOrder: "stroke", stroke: "#0f0c09", strokeWidth: 2 }}
-                  >
-                    {b.label}
-                  </text>
-                )}
+                {/* Solid colour chip + label. */}
+                <rect
+                  x={chipX - 3}
+                  y={chipAboveY - 11}
+                  width={Math.max(36, labelText.length * 6.8 + 14)}
+                  height={14}
+                  rx={3}
+                  fill={b.color}
+                  opacity={0.95}
+                />
+                <text
+                  x={chipX + 3}
+                  y={chipAboveY}
+                  fill="#ffffff"
+                  fontSize="10"
+                  fontFamily="system-ui, sans-serif"
+                  fontWeight={600}
+                  style={{ userSelect: "none" }}
+                >
+                  {labelText}
+                </text>
               </g>
             );
           })}
@@ -490,15 +574,24 @@ export function ImageCanvas({
       )}
 
       {drawRect && (
-        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-10">
+        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-30">
           <rect
             x={Math.min(drawRect.x0, drawRect.x1)}
             y={Math.min(drawRect.y0, drawRect.y1)}
             width={Math.abs(drawRect.x1 - drawRect.x0)}
             height={Math.abs(drawRect.y1 - drawRect.y0)}
             fill={`${drawColor}33`}
+            stroke="rgba(255,255,255,0.9)"
+            strokeWidth={4}
+          />
+          <rect
+            x={Math.min(drawRect.x0, drawRect.x1)}
+            y={Math.min(drawRect.y0, drawRect.y1)}
+            width={Math.abs(drawRect.x1 - drawRect.x0)}
+            height={Math.abs(drawRect.y1 - drawRect.y0)}
+            fill="none"
             stroke={drawColor}
-            strokeWidth={2.5}
+            strokeWidth={2}
             strokeDasharray="4 3"
           />
         </svg>

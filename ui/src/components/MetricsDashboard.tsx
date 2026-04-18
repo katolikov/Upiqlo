@@ -19,6 +19,9 @@ const SEVERITY_LABELS: Record<string, string> = {
   blur: "Blur",
 };
 
+/** Compact fixed height. */
+const PANEL_HEIGHT = "h-16";
+
 /**
  * Bottom results panel. During a live run it hosts the smooth progress
  * bar; after completion it renders score + dominant artifact + severity
@@ -27,7 +30,7 @@ const SEVERITY_LABELS: Record<string, string> = {
 export function MetricsDashboard({ report, status, runningStatus }: Props) {
   if (status === "running" && runningStatus) {
     return (
-      <div className="h-28 border-t border-surface-border bg-surface-raised flex items-center px-6">
+      <div className={cn(PANEL_HEIGHT, "border-t border-surface-border bg-surface-raised flex items-center px-6")}>
         <ProgressBar status={runningStatus} />
       </div>
     );
@@ -35,7 +38,7 @@ export function MetricsDashboard({ report, status, runningStatus }: Props) {
 
   if (!report) {
     return (
-      <div className="h-28 border-t border-surface-border bg-surface-raised flex items-center justify-center text-xs text-text-faint">
+      <div className={cn(PANEL_HEIGHT, "border-t border-surface-border bg-surface-raised flex items-center justify-center text-xs text-text-faint")}>
         {status === "error"
           ? "Comparison failed — see workspace for details."
           : status === "cancelled"
@@ -49,7 +52,7 @@ export function MetricsDashboard({ report, status, runningStatus }: Props) {
   const score01 = Math.max(0, Math.min(1, report.score));
 
   return (
-    <div className="h-28 border-t border-surface-border bg-surface-raised flex items-stretch animate-fade-in">
+    <div className={cn(PANEL_HEIGHT, "border-t border-surface-border bg-surface-raised flex items-stretch animate-fade-in")}>
       <ScoreBlock score={score01} label={report.score_label} />
       <DominantBlock
         dominant={report.diagnostics.dominant_artifact}
@@ -76,33 +79,33 @@ export function MetricsDashboard({ report, status, runningStatus }: Props) {
 
 function ScoreBlock({ score, label }: { score: number; label: string }) {
   const color =
-    score >= 0.9
+    score >= 0.75
       ? "text-signal-success"
-      : score >= 0.75
-        ? "text-signal-success"
-        : score >= 0.6
-          ? "text-signal-warning"
-          : score >= 0.45
-            ? "text-signal-warning"
-            : "text-signal-danger";
+      : score >= 0.45
+        ? "text-signal-warning"
+        : "text-signal-danger";
   return (
-    <div className="w-40 px-4 py-2 flex flex-col justify-center border-r border-surface-border">
-      <div className="text-[10px] uppercase tracking-wider text-text-faint">FR-IQA Score</div>
-      <div className={cn("text-2xl font-semibold tabular-nums leading-none mt-1", color)}>
-        {score.toFixed(3)}
+    <div className="w-36 px-3 py-1.5 flex flex-col justify-center border-r border-surface-border">
+      <div className="text-[9px] uppercase tracking-wider text-text-faint leading-tight">Score</div>
+      <div className="flex items-baseline gap-2 mt-0.5">
+        <span className={cn("text-lg font-semibold tabular-nums leading-none", color)}>
+          {score.toFixed(3)}
+        </span>
+        <span className="text-[10px] text-text-muted truncate">{label}</span>
       </div>
-      <div className="text-[11px] text-text-muted mt-1">{label}</div>
     </div>
   );
 }
 
 function DominantBlock({ dominant, affected }: { dominant: string; affected: number }) {
   return (
-    <div className="w-44 px-4 py-2 flex flex-col justify-center border-r border-surface-border">
-      <div className="text-[10px] uppercase tracking-wider text-text-faint">Dominant Artifact</div>
-      <div className="text-base font-medium leading-none mt-1">{dominant}</div>
-      <div className="text-[11px] text-text-muted mt-1">
-        {affected.toFixed(1)}% affected area
+    <div className="w-40 px-3 py-1.5 flex flex-col justify-center border-r border-surface-border">
+      <div className="text-[9px] uppercase tracking-wider text-text-faint leading-tight">Dominant</div>
+      <div className="flex items-baseline gap-2 mt-0.5">
+        <span className="text-[12px] font-medium leading-none truncate">{dominant}</span>
+        <span className="text-[10px] text-text-muted tabular-nums shrink-0">
+          {affected.toFixed(1)}%
+        </span>
       </div>
     </div>
   );
@@ -119,12 +122,12 @@ function SeverityBlock({ name, value }: { name: string; value: number }) {
           ? "bg-signal-success/60"
           : "bg-signal-success/40";
   return (
-    <div className="px-3 py-2 flex flex-col justify-center border-r border-surface-border last:border-r-0">
-      <div className="text-[10px] uppercase tracking-wider text-text-faint truncate">{name}</div>
-      <div className="text-base font-medium tabular-nums leading-none mt-1">
-        {value.toFixed(1)}
+    <div className="px-2 py-1.5 flex flex-col justify-center border-r border-surface-border last:border-r-0 min-w-0">
+      <div className="flex items-baseline justify-between gap-1">
+        <span className="text-[9px] uppercase tracking-wider text-text-faint truncate">{name}</span>
+        <span className="text-[11px] font-medium tabular-nums shrink-0">{value.toFixed(1)}</span>
       </div>
-      <div className="h-1.5 mt-2 bg-surface-sunken rounded-full overflow-hidden">
+      <div className="h-1 mt-1 bg-surface-sunken rounded-full overflow-hidden">
         <div
           className={cn("h-full rounded-full transition-[width] duration-500 ease-out", bar)}
           style={{ width: `${clamped}%` }}
@@ -136,12 +139,11 @@ function SeverityBlock({ name, value }: { name: string; value: number }) {
 
 function ResolutionBlock({ width, height }: { width: number; height: number }) {
   return (
-    <div className="w-36 px-4 py-2 flex flex-col justify-center">
-      <div className="text-[10px] uppercase tracking-wider text-text-faint">Resolution</div>
-      <div className="text-base font-medium tabular-nums leading-none mt-1">
+    <div className="w-28 px-3 py-1.5 flex flex-col justify-center">
+      <div className="text-[9px] uppercase tracking-wider text-text-faint leading-tight">Resolution</div>
+      <div className="text-[12px] font-medium tabular-nums leading-none mt-0.5">
         {width}×{height}
       </div>
-      <div className="text-[11px] text-text-muted mt-1">pixels</div>
     </div>
   );
 }

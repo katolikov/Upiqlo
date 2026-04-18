@@ -1,12 +1,11 @@
 /**
- * Render the "Unified" artifact-highlight view on the frontend.
+ * Render the "Unified" artefact-highlight view on the frontend.
  *
- * The base image is rendered 100% untinted in grayscale. Only pixels
- * that the backend identifies as artefacts above a configurable floor
- * pick up colour — regions with no detected artefact stay pure gray.
- *
- * All layer compositing is done in the browser so toggling a layer on
- * or off is instantaneous (no heavy algorithm re-run).
+ * The base image is rendered as darkened grayscale. Each enabled mask
+ * contributes strength only where it is above a per-layer floor. At
+ * each pixel we pick the *strongest* layer and tint with its colour
+ * (winner-takes-all). Non-artefact regions stay grayscale, keeping the
+ * output legible rather than muddy from stacked translucent masks.
  */
 
 import { heatmapDataUrl } from "./api";
@@ -27,8 +26,7 @@ export interface UnifiedLayerSpec {
   /** 0..1 — multiplier applied to the mask's intensity. */
   intensity?: number;
   /** 0..1 — mask values below this are treated as "no artefact" (zero
-   * alpha), so non-artefact regions stay pure grayscale. Prevents the
-   * low-value tail of the jet colourmap from tinting the whole image. */
+   * alpha). Raise to strip the low-value tail of the jet colourmap. */
   floor?: number;
 }
 
@@ -38,12 +36,12 @@ export interface UnifiedLayerSpec {
  * where relevant.
  */
 export const UNIFIED_LAYERS: UnifiedLayerSpec[] = [
-  { key: "global_anomaly_map.png", label: "Anomaly", color: "#D6521F", intensity: 1.05, floor: 0.3 },
-  { key: "gibbs_ringing_mask.png", label: "Ringing", color: "#4F8AA3", intensity: 1.0, floor: 0.25 },
-  { key: "gaussian_noise_mask.png", label: "Noise", color: "#5F9755", intensity: 1.0, floor: 0.25 },
-  { key: "blur_mask.png", label: "Blur", color: "#C58F3B", intensity: 1.0, floor: 0.3 },
-  { key: "color_degradation_map.png", label: "Color shift", color: "#B84A6C", intensity: 0.9, floor: 0.3 },
-  { key: "structural_similarity_map.png", label: "Structure", color: "#7A5BA6", intensity: 0.8, floor: 0.4 },
+  { key: "global_anomaly_map.png",        label: "Anomaly",     color: "#D6521F", intensity: 1.0, floor: 0.45 },
+  { key: "gibbs_ringing_mask.png",        label: "Ringing",     color: "#4F8AA3", intensity: 1.0, floor: 0.35 },
+  { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 1.0, floor: 0.35 },
+  { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 1.0, floor: 0.40 },
+  { key: "color_degradation_map.png",     label: "Color shift", color: "#B84A6C", intensity: 1.0, floor: 0.40 },
+  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 1.0, floor: 0.50 },
 ];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -56,28 +54,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function paintGrayscale(
-  ctx: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  width: number,
-  height: number,
-) {
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(image, 0, 0, width, height);
-  const img = ctx.getImageData(0, 0, width, height);
-  const data = img.data;
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const lum = 0.2989 * r + 0.587 * g + 0.114 * b;
-    data[i] = lum;
-    data[i + 1] = lum;
-    data[i + 2] = lum;
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const h = hex.replace("#", "");
   return {
@@ -87,48 +63,30 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   };
 }
 
-/**
- * Paint a mask layer tinted with `color`. Pixels whose mask brightness is
- * below `floor` contribute alpha = 0, keeping the grayscale base visible
- * in those regions. Everything above the floor is rescaled to [0, 255]
- * and scaled by `intensity`.
- */
-function paintTintedMask(
-  out: CanvasRenderingContext2D,
-  mask: HTMLImageElement,
-  color: { r: number; g: number; b: number },
-  intensity: number,
-  floor: number,
-  width: number,
-  height: number,
-) {
+/** Extract a per-pixel scalar strength (0..255) from a colour mask. */
+function extractStrength(
+  img: HTMLImageElement,
+  w: number,
+  h: number,
+): Uint8Array {
   const buf = document.createElement("canvas");
-  buf.width = width;
-  buf.height = height;
-  const bctx = buf.getContext("2d");
-  if (!bctx) return;
-  bctx.drawImage(mask, 0, 0, width, height);
-  const img = bctx.getImageData(0, 0, width, height);
-  const data = img.data;
-  const denom = Math.max(1 / 255, 1 - floor);
-  for (let i = 0; i < data.length; i += 4) {
+  buf.width = w;
+  buf.height = h;
+  const ctx = buf.getContext("2d");
+  if (!ctx) return new Uint8Array(w * h);
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const out = new Uint8Array(w * h);
+  for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    const peak = Math.max(r, g, b) / 255;
-    const raw = Math.max(lum, peak); // 0..1
-    // Below-floor → zero alpha (no tint applied). Above-floor → linearly
-    // rescaled to [0, 1] then * intensity * 255 → alpha.
-    const above = Math.max(0, raw - floor) / denom;
-    const alpha = Math.min(255, above * intensity * 255);
-    data[i] = color.r;
-    data[i + 1] = color.g;
-    data[i + 2] = color.b;
-    data[i + 3] = alpha;
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const peak = Math.max(r, g, b);
+    // Works for both binary masks and jet-colourmapped continuous heatmaps.
+    out[j] = Math.max(lum, peak) | 0;
   }
-  bctx.putImageData(img, 0, 0);
-  out.drawImage(buf, 0, 0);
+  return out;
 }
 
 export interface BuildUnifiedArgs {
@@ -152,32 +110,79 @@ export async function buildUnified({
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
 
-    paintGrayscale(ctx, base, w, h);
+    // 1. Paint a darkened grayscale base so artefact tints pop.
+    ctx.drawImage(base, 0, 0, w, h);
+    const baseImg = ctx.getImageData(0, 0, w, h);
+    const baseData = baseImg.data;
+    for (let i = 0; i < baseData.length; i += 4) {
+      const r = baseData[i];
+      const g = baseData[i + 1];
+      const b = baseData[i + 2];
+      const lum = 0.2989 * r + 0.587 * g + 0.114 * b;
+      const dim = lum * 0.7;
+      baseData[i] = dim;
+      baseData[i + 1] = dim;
+      baseData[i + 2] = dim;
+    }
 
-    // Stack each enabled mask with alpha-compositing. With the floor +
-    // rescale, non-artefact pixels stay at alpha=0 so the grayscale
-    // base shows through. The "source-over" default blend is sufficient;
-    // later masks sit on top of earlier ones.
+    // 2. Extract per-pixel strength for each enabled mask.
+    const layers: {
+      spec: UnifiedLayerSpec;
+      strength: Uint8Array;
+      rgb: { r: number; g: number; b: number };
+    }[] = [];
     for (const spec of UNIFIED_LAYERS) {
       if (!enabled.has(spec.key)) continue;
       const b64 = heatmaps[spec.key];
       if (!b64) continue;
       try {
         const mask = await loadImage(heatmapDataUrl(b64));
-        paintTintedMask(
-          ctx,
-          mask,
-          hexToRgb(spec.color),
-          spec.intensity ?? 1.0,
-          spec.floor ?? 0.25,
-          w,
-          h,
-        );
+        layers.push({
+          spec,
+          strength: extractStrength(mask, w, h),
+          rgb: hexToRgb(spec.color),
+        });
       } catch {
-        /* skip unreadable mask */
+        /* unreadable mask → skip */
       }
     }
 
+    if (layers.length === 0) {
+      ctx.putImageData(baseImg, 0, 0);
+      return canvas.toDataURL("image/png");
+    }
+
+    // 3. Winner-takes-all per pixel: above-floor max wins, gets tinted.
+    const N = w * h;
+    for (let p = 0, i = 0; p < N; p += 1, i += 4) {
+      let bestAlpha = 0;
+      let bestR = 0, bestG = 0, bestB = 0;
+      for (const L of layers) {
+        const s = L.strength[p] / 255;
+        const floor = L.spec.floor ?? 0.35;
+        if (s <= floor) continue;
+        const intensity = L.spec.intensity ?? 1.0;
+        const rescaled = Math.min(
+          1,
+          (s - floor) / Math.max(1 / 255, 1 - floor),
+        );
+        const a = rescaled * intensity;
+        if (a > bestAlpha) {
+          bestAlpha = a;
+          bestR = L.rgb.r;
+          bestG = L.rgb.g;
+          bestB = L.rgb.b;
+        }
+      }
+      if (bestAlpha > 0) {
+        const a = Math.min(0.85, bestAlpha);
+        const inv = 1 - a;
+        baseData[i] = bestR * a + baseData[i] * inv;
+        baseData[i + 1] = bestG * a + baseData[i + 1] * inv;
+        baseData[i + 2] = bestB * a + baseData[i + 2] * inv;
+      }
+    }
+    ctx.putImageData(baseImg, 0, 0);
     return canvas.toDataURL("image/png");
   } catch {
     return null;
