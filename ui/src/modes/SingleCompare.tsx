@@ -78,18 +78,9 @@ export function SingleCompareMode({ session }: Props) {
     activeStreams.get(session.id) ?? null,
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([resolveImageSrc(session.referencePath), resolveImageSrc(session.targetPath)])
-      .then(([r, t]) => {
-        if (cancelled) return;
-        setRefSrc(r);
-        setTgtSrc(t);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session.referencePath, session.targetPath]);
+  // (Image resolution runs below through the `reloadNonce` effect —
+  // merging the two avoids a race where the plain resolver and the
+  // cache-busting resolver could both land and overwrite each other.)
 
   useEffect(() => {
     const off = onTauriFileDrop((paths) => {
@@ -308,9 +299,13 @@ export function SingleCompareMode({ session }: Props) {
   // Reload: force re-fetch of input images (cache-buster) and re-run if
   // we already have a valid pair. A brand-new timestamp on the resolved
   // src triggers <img> reload even if the path didn't change.
-  const [reloadNonce, setReloadNonce] = useState(0);
+  //
+  // A non-zero initial nonce makes the re-resolve also run on first
+  // mount — important for sessions that are mounted after a background
+  // run completed while the user was on another tab, so the middle
+  // pane doesn't stay blank until the user taps Reload manually.
+  const [reloadNonce, setReloadNonce] = useState(() => Date.now());
   useEffect(() => {
-    if (reloadNonce === 0) return;
     let cancelled = false;
     Promise.all([
       resolveImageSrc(session.referencePath),

@@ -84,20 +84,9 @@ export function FolderCompareMode({ session }: Props) {
   const pairStatus = currentPairId ? session.results[currentPairId] : null;
   const annotations = currentPairId ? session.annotationsByPair[currentPairId] ?? [] : [];
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      resolveImageSrc(session.activeReferencePath),
-      resolveImageSrc(session.activeTargetPath),
-    ]).then(([r, t]) => {
-      if (cancelled) return;
-      setRefSrc(r);
-      setTgtSrc(t);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [session.activeReferencePath, session.activeTargetPath]);
+  // (Image resolution runs below through the `reloadNonce` effect —
+  // merging the two avoids a race where the plain resolver and the
+  // cache-busting resolver could both land and overwrite each other.)
 
   useEffect(() => {
     if (!session.referenceDir || !session.targetDir) return;
@@ -325,9 +314,11 @@ export function FolderCompareMode({ session }: Props) {
     [session.scan],
   );
 
-  const [reloadNonce, setReloadNonce] = useState(0);
+  // Non-zero initial nonce so the re-resolve path also runs on first
+  // mount — keeps the middle/output pane from staying blank after a
+  // tab switch when a background run has already produced a report.
+  const [reloadNonce, setReloadNonce] = useState(() => Date.now());
   useEffect(() => {
-    if (reloadNonce === 0) return;
     let cancelled = false;
     Promise.all([
       resolveImageSrc(session.activeReferencePath),

@@ -38,7 +38,9 @@ export function UnifiedToggles({
   }
 
   return (
-    <div className="flex flex-col items-start gap-1">
+    // Fixed-width column so every chip lines up — the Chip gets
+    // `w-full` and fills the column rather than autosizing to its label.
+    <div className="flex flex-col items-stretch gap-1 w-[120px]">
       {UNIFIED_LAYERS.map((layer) => (
         <Chip
           key={layer.key}
@@ -46,6 +48,7 @@ export function UnifiedToggles({
           enabled={enabled.has(layer.key)}
           available={available.has(layer.key)}
           onToggle={() => onToggle(layer.key)}
+          fullWidth
         />
       ))}
     </div>
@@ -57,11 +60,16 @@ function Chip({
   enabled,
   available,
   onToggle,
+  fullWidth = false,
 }: {
   layer: (typeof UNIFIED_LAYERS)[number];
   enabled: boolean;
   available: boolean;
   onToggle: () => void;
+  /** When true, the chip fills its parent column so every chip has
+   * the same width regardless of label length. Used in the vertical
+   * legend so the rows line up cleanly. */
+  fullWidth?: boolean;
 }) {
   return (
     <button
@@ -70,6 +78,7 @@ function Chip({
       onClick={onToggle}
       className={cn(
         "flex items-center gap-1.5 h-6 px-2 rounded border text-[11px] font-medium transition-colors whitespace-nowrap",
+        fullWidth && "w-full",
         available
           ? enabled
             ? "bg-surface-raised/95 border-surface-border-strong text-text"

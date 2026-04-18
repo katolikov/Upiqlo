@@ -314,7 +314,6 @@ export const useSessions = create<SessionStore>((set, get) => ({
     };
     const session = buildSession(entry.mode, entry.title, snapshot, seed);
     set((s) => ({ sessions: [...s.sessions, session], activeId: session.id }));
-    // Refresh the lastOpenedAt on the recent entry.
     const refreshed: RecentEntry = { ...entry, lastOpenedAt: Date.now() };
     get().pushRecent(refreshed);
     return session.id;

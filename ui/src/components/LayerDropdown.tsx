@@ -69,7 +69,7 @@ export function LayerDropdown({ value, onChange, available }: Props) {
           className={cn(
             "absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 min-w-[240px]",
             "rounded-md border border-surface-border bg-surface-raised shadow-lg py-1",
-            "animate-dropdown-in origin-top",
+            "animate-dropdown-in-centered origin-top",
           )}
         >
           {(["semantic", "structural", "heuristic"] as const).map((group) => (

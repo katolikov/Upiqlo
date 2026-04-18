@@ -87,9 +87,15 @@ export default {
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
         "dropdown-in": {
-          // Preserve the `-translate-x-1/2` (translateX(-50%)) that the
-          // menu uses to stay horizontally centred under its trigger;
-          // without it the menu jumps from right-edge to centre when
+          // Plain keyframe for popovers that use `right-0`, `left-0`
+          // or are otherwise anchored without a -translate-x-1/2.
+          "0%": { opacity: "0", transform: "translateY(-4px) scaleY(0.96)" },
+          "100%": { opacity: "1", transform: "translateY(0) scaleY(1)" },
+        },
+        "dropdown-in-centered": {
+          // Variant that preserves the translateX(-50%) used by the
+          // Output pane's LayerDropdown — without this the menu would
+          // jump from the right edge of its trigger to centre when
           // the animation ends.
           "0%": { opacity: "0", transform: "translateX(-50%) translateY(-4px) scaleY(0.96)" },
           "100%": { opacity: "1", transform: "translateX(-50%) translateY(0) scaleY(1)" },
@@ -101,6 +107,7 @@ export default {
         "toast-in": "toast-in 220ms cubic-bezier(0.22, 1, 0.36, 1)",
         "tab-in": "tab-in 140ms ease-out",
         "dropdown-in": "dropdown-in 120ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "dropdown-in-centered": "dropdown-in-centered 120ms cubic-bezier(0.22, 1, 0.36, 1)",
       },
     },
   },
