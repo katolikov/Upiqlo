@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use engine::EngineHandle;
+use tauri::{Manager, RunEvent, WindowEvent};
 
 pub struct AppState {
     pub engine: Arc<Mutex<EngineHandle>>,
@@ -35,11 +36,37 @@ fn main() {
             });
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                // Kill the sidecar as soon as the main window is asked
+                // to close. Windows would otherwise leave the
+                // PyInstaller process running after the GUI disappears.
+                if let Some(state) = window.app_handle().try_state::<AppState>() {
+                    let engine = state.engine.clone();
+                    tauri::async_runtime::spawn(async move {
+                        engine.lock().await.kill();
+                    });
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_engine_port,
             commands::get_engine_token,
             commands::ping,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Upiqlo");
+        .build(tauri::generate_context!())
+        .expect("error while building Upiqlo")
+        .run(|app, event| {
+            // Last-line defence: kill the sidecar on the global Exit
+            // event (covers cmd+Q and other exit paths the window
+            // handler doesn't see).
+            if let RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let engine = state.engine.clone();
+                    tauri::async_runtime::block_on(async move {
+                        engine.lock().await.kill();
+                    });
+                }
+            }
+        });
 }

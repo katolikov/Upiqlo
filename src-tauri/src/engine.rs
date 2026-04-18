@@ -23,15 +23,30 @@ use crate::AppState;
 /// Rust target triple at build time (lowercased host triple).
 const TARGET_TRIPLE: &str = env!("TARGET_TRIPLE");
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct EngineHandle {
     pub port: Option<u16>,
     pub token: Option<String>,
+    /// Retained so we can explicitly `kill()` the sidecar when the
+    /// Tauri window closes. Without this, `CommandChild` drops as a
+    /// no-op on Windows and leaves a zombie `upiqlo-engine` process.
+    pub child: Option<tauri_plugin_shell::process::CommandChild>,
 }
 
 impl EngineHandle {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Best-effort kill of the sidecar. Called on window close / app
+    /// exit so ML processes don't linger past the GUI.
+    pub fn kill(&mut self) {
+        if let Some(child) = self.child.take() {
+            match child.kill() {
+                Ok(_) => log::info!("Engine sidecar terminated cleanly"),
+                Err(err) => log::warn!("Engine sidecar kill failed: {err}"),
+            }
+        }
     }
 }
 
@@ -42,7 +57,13 @@ pub async fn spawn_engine(app: &AppHandle) -> Result<()> {
     // Use the shell plugin's `command()` (platform-agnostic launcher) so the
     // same stdout/stderr stream plumbing works as with a named sidecar.
     let cmd = app.shell().command(exe.to_string_lossy().to_string());
-    let (mut rx, _child) = cmd.spawn().context("spawning upiqlo-engine sidecar")?;
+    let (mut rx, child) = cmd.spawn().context("spawning upiqlo-engine sidecar")?;
+
+    // Stash the child handle so we can kill it on window close.
+    if let Some(state) = app.try_state::<AppState>() {
+        let mut guard = state.engine.lock().await;
+        guard.child = Some(child);
+    }
 
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {

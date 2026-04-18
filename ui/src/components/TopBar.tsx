@@ -12,10 +12,10 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { fetchHealth, type HealthResponse } from "@/lib/api";
 import {
-  downloadUpiqloFile,
   exportSession,
   importSession,
   pickUpiqloFile,
+  saveUpiqloFile,
 } from "@/lib/session-io";
 import { useSessions } from "@/state/sessions";
 import { toast } from "@/state/toast";
@@ -76,13 +76,22 @@ export function TopBar() {
     }
   };
 
-  const onExport = () => {
+  const onExport = async () => {
     if (!activeSession) return;
-    downloadUpiqloFile(
-      exportSession(activeSession),
-      activeSession.title.replace(/\s+/g, "_"),
-    );
-    toast("success", `Saved "${activeSession.title}.upiqlo"`);
+    try {
+      const { path, filename } = await saveUpiqloFile(
+        exportSession(activeSession),
+        activeSession.title.replace(/\s+/g, "_"),
+      );
+      if (path) {
+        toast("success", `Saved session to ${path}`);
+      } else {
+        toast("success", `Saved ${filename}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast("error", `Save failed: ${msg}`);
+    }
   };
 
   return (

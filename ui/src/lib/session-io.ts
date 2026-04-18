@@ -166,6 +166,38 @@ export function downloadUpiqloFile(doc: UpiqloSessionDocV1, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Save a `.upiqlo` session through Tauri's native save dialog so the
+ * user can pick a destination, and return the absolute path that was
+ * written. Falls back to the browser-download path when we're not
+ * running inside Tauri.
+ */
+export async function saveUpiqloFile(
+  doc: UpiqloSessionDocV1,
+  defaultName: string,
+): Promise<{ path: string | null; filename: string }> {
+  const json = JSON.stringify(doc, null, 2);
+  const base = defaultName.endsWith(".upiqlo") ? defaultName : `${defaultName}.upiqlo`;
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    try {
+      const dialog = await import("@tauri-apps/plugin-dialog");
+      const fs = await import("@tauri-apps/plugin-fs");
+      const path = await dialog.save({
+        title: "Save Upiqlo session",
+        defaultPath: base,
+        filters: [{ name: "Upiqlo session", extensions: ["upiqlo"] }],
+      });
+      if (!path) return { path: null, filename: base };
+      await fs.writeTextFile(path, json);
+      return { path, filename: path.split(/[\\/]/).pop() ?? base };
+    } catch (err) {
+      console.warn("tauri save dialog failed, falling back", err);
+    }
+  }
+  downloadUpiqloFile(doc, base);
+  return { path: null, filename: base };
+}
+
 /** Triggers a hidden <input type="file"> to read a .upiqlo document. */
 export function pickUpiqloFile(): Promise<UpiqloSessionDocV1 | null> {
   return new Promise((resolve) => {
