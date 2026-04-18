@@ -75,6 +75,18 @@ def main() -> None:
                 raise RuntimeError(f"no report.json in {out_dir}")
             report = json.loads(report_path.read_text())
 
+            # Post-process: grayscale-background + colour-highlighted anomaly.
+            try:
+                from upiqlo_engine.anomaly_highlight import generate_highlight
+
+                generate_highlight(
+                    target_path=Path(args.target),
+                    anomaly_map_path=out_dir / "global_anomaly_map.png",
+                    out_path=out_dir / "anomaly_highlight.png",
+                )
+            except Exception as e:
+                sys.stderr.write(f"anomaly_highlight post-process failed: {e}\n")
+
             heatmaps: dict[str, str] = {}
             for name in _HEATMAP_FILES:
                 p = out_dir / name

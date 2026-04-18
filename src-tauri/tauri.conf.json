@@ -23,7 +23,14 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": ["$HOME/**", "$DESKTOP/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$PICTURE/**", "$TEMP/**", "/tmp/**", "/var/folders/**", "/Users/**", "C:/**", "/home/**", "/mnt/**", "/media/**"],
+          "deny": []
+        }
+      }
     }
   },
   "bundle": {

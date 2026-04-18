@@ -1,8 +1,21 @@
-import { Activity, AlertCircle, CheckCircle2, RotateCcw } from "lucide-react";
+import {
+  Activity,
+  AlertCircle,
+  CheckCircle2,
+  Download,
+  FolderPlus,
+  ImagePlus,
+  Upload,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { fetchHealth, type HealthResponse } from "@/lib/api";
-import { usePreferences, type Preferences } from "@/state/preferences";
+import {
+  downloadUpiqloFile,
+  exportSession,
+  importSession,
+  pickUpiqloFile,
+} from "@/lib/session-io";
 import { useSessions } from "@/state/sessions";
 
 type EngineStatus =
@@ -10,34 +23,22 @@ type EngineStatus =
   | { kind: "ok"; health: HealthResponse }
   | { kind: "error"; message: string };
 
+/**
+ * The global top bar. Stays compact: brand, quick-new-session icons,
+ * save/open for the active session, and the engine status chip.
+ *
+ * Per-session parameters live INSIDE each session's workspace now
+ * (see SessionConfigBar).
+ */
 export function TopBar() {
   const [engine, setEngine] = useState<EngineStatus>({ kind: "loading" });
-  const prefs = usePreferences();
-  const sessions = useSessions((s) => s.sessions);
-  const activeId = useSessions((s) => s.activeId);
-  const updateParams = useSessions((s) => s.updateParams);
-  const resetParams = useSessions((s) => s.resetParams);
-  const activeSession = sessions.find((s) => s.id === activeId) ?? null;
-
-  // Effective parameter view: when a session is active, the TopBar reflects
-  // and edits THAT session's snapshot. Without an active session, it falls
-  // back to the global defaults.
-  const effective: Preferences = activeSession ? activeSession.params : prefs;
-
-  const onUpdate = (patch: Partial<Preferences>) => {
-    if (activeSession) {
-      updateParams(activeSession.id, patch);
-    } else {
-      prefs.update(patch);
-    }
-  };
-  const onReset = () => {
-    if (activeSession) {
-      resetParams(activeSession.id);
-    } else {
-      prefs.reset();
-    }
-  };
+  const openSession = useSessions((s) => s.openSession);
+  const hydrateSession = useSessions((s) => s.hydrateSession);
+  const activeSession = useSessions((s) => {
+    const a = s.sessions.find((x) => x.id === s.activeId);
+    return a ?? null;
+  });
+  const hasSessions = useSessions((s) => s.sessions.length > 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,8 +60,28 @@ export function TopBar() {
     };
   }, []);
 
+  const onImport = async () => {
+    const doc = await pickUpiqloFile();
+    if (doc) {
+      try {
+        const sess = importSession(doc);
+        hydrateSession(sess);
+      } catch (e) {
+        alert(`Import failed: ${(e as Error).message}`);
+      }
+    }
+  };
+
+  const onExport = () => {
+    if (!activeSession) return;
+    downloadUpiqloFile(
+      exportSession(activeSession),
+      activeSession.title.replace(/\s+/g, "_"),
+    );
+  };
+
   return (
-    <header className="h-12 border-b border-surface-border flex items-center px-3 gap-3 bg-surface-raised shrink-0">
+    <header className="h-11 border-b border-surface-border flex items-center px-3 gap-2 bg-surface-raised shrink-0">
       <div className="w-7 h-7 rounded-md bg-accent/20 border border-accent/40 flex items-center justify-center">
         <Activity size={16} className="text-accent" />
       </div>
@@ -71,148 +92,63 @@ export function TopBar() {
 
       <div className="h-5 w-px bg-surface-border mx-1" />
 
-      {/* Parameters — bound to the active session's snapshot (or globals
-          if no session is open). A small pill indicates scope. */}
-      <span
-        className={cn(
-          "text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border",
-          activeSession
-            ? "border-accent/40 bg-accent/10 text-accent"
-            : "border-surface-border text-text-faint",
-        )}
-        title={
-          activeSession
-            ? `Editing params for the active tab; each tab has its own snapshot`
-            : "No tab open — editing global defaults"
-        }
-      >
-        {activeSession ? "tab" : "global"}
-      </span>
-      <SliderField
-        label="Max side"
-        value={effective.maxSide}
-        min={256}
-        max={2048}
-        step={64}
-        suffix="px"
-        onChange={(v) => onUpdate({ maxSide: v })}
+      {/* Compact new-session icons — always visible at the top level. */}
+      <IconButton
+        onClick={() => openSession("single")}
+        label="New file comparison"
+        icon={<ImagePlus size={14} />}
       />
-      <SliderField
-        label="Feature side"
-        value={effective.featureSide}
-        min={128}
-        max={512}
-        step={16}
-        suffix="px"
-        onChange={(v) => onUpdate({ featureSide: v })}
+      <IconButton
+        onClick={() => openSession("folder")}
+        label="New folder comparison"
+        icon={<FolderPlus size={14} />}
       />
-      <Toggle
-        label="Pyramid"
-        checked={effective.pyramid}
-        onChange={(v) => onUpdate({ pyramid: v })}
+
+      <div className="h-5 w-px bg-surface-border mx-1" />
+
+      <IconButton
+        onClick={onImport}
+        label="Open session (.upiqlo)"
+        icon={<Upload size={14} />}
       />
-      <Segmented
-        label="Score"
-        value={effective.scoreMode}
-        options={[
-          { value: "sigmoid", label: "Sigmoid" },
-          { value: "nll", label: "NLL" },
-        ]}
-        onChange={(v) => onUpdate({ scoreMode: v as "sigmoid" | "nll" })}
+      <IconButton
+        onClick={onExport}
+        label={activeSession ? "Save session (.upiqlo)" : "No active session to save"}
+        disabled={!activeSession}
+        icon={<Download size={14} />}
       />
-      <button
-        type="button"
-        onClick={onReset}
-        className="text-[11px] px-2 py-1 rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface/60 flex items-center gap-1"
-        title={activeSession ? "Reset this tab's params to current globals" : "Reset global params"}
-      >
-        <RotateCcw size={12} /> Reset
-      </button>
 
       <div className="flex-1" />
 
+      {!hasSessions && (
+        <span className="text-[11px] text-text-faint mr-2">No session open</span>
+      )}
       <EngineChip status={engine} />
     </header>
   );
 }
 
-interface SliderFieldProps {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  suffix?: string;
-  onChange: (v: number) => void;
-}
-
-function SliderField(props: SliderFieldProps) {
-  return (
-    <label className="flex items-center gap-2 text-[11px] text-text-muted">
-      <span className="whitespace-nowrap">{props.label}</span>
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        step={props.step}
-        value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value))}
-        className="w-24 accent-accent"
-      />
-      <span className="tabular-nums text-text w-14">
-        {props.value}
-        {props.suffix}
-      </span>
-    </label>
-  );
-}
-
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-1.5 text-[11px] text-text-muted cursor-pointer select-none">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="accent-accent"
-      />
-      <span>{label}</span>
-    </label>
-  );
-}
-
-function Segmented<T extends string>({
+function IconButton({
+  onClick,
   label,
-  value,
-  options,
-  onChange,
+  icon,
+  disabled,
 }: {
+  onClick: () => void;
   label: string;
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (v: T) => void;
+  icon: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
-      <span>{label}</span>
-      <div className="flex rounded-md border border-surface-border overflow-hidden">
-        {options.map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onChange(o.value)}
-            className={cn(
-              "px-2 py-1 transition-colors",
-              value === o.value
-                ? "bg-accent/15 text-accent"
-                : "hover:bg-surface/60 hover:text-text",
-            )}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      className="w-7 h-7 flex items-center justify-center rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+    >
+      {icon}
+    </button>
   );
 }
 

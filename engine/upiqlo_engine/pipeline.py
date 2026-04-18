@@ -200,14 +200,16 @@ _HEATMAP_FILES = [
     "global_anomaly_map.png",
     # Upstream commit a611d41 dropped `jpeg_blocking_mask.png` from the
     # PNG output list (the detector still runs; severity is reported in
-    # the JSON report's `severity_scores.blocking` field). The blocking
-    # severity bar in our MetricsDashboard still works.
+    # the JSON report's `severity_scores.blocking` field).
     "gibbs_ringing_mask.png",
     "gaussian_noise_mask.png",
     "blur_mask.png",
     "anomaly_overlay.png",
     # Unified diagnostic overlay — all artefact channels on one image.
     "diagnostic_overlay.png",
+    # Grayscale-background + colour-highlighted anomaly, produced by
+    # upiqlo_engine.anomaly_highlight after the upstream pipeline finishes.
+    "anomaly_highlight.png",
 ]
 
 
@@ -331,6 +333,19 @@ def run_compare(
                 f"Pipeline produced no report.json in {out_dir}"
             )
         report = json.loads(report_path.read_text())
+
+        # Derive the grayscale-background + colour-highlighted anomaly.
+        # Absolute import so this also resolves inside the PyInstaller bundle.
+        from upiqlo_engine.anomaly_highlight import generate_highlight
+
+        try:
+            generate_highlight(
+                target_path=tgt,
+                anomaly_map_path=out_dir / "global_anomaly_map.png",
+                out_path=out_dir / "anomaly_highlight.png",
+            )
+        except Exception:
+            log.exception("anomaly_highlight post-process failed")
 
         heatmaps: Dict[str, str] = {}
         for name in _HEATMAP_FILES:

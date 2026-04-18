@@ -182,6 +182,8 @@ async def test_full_ui_to_model_roundtrip(
             "blur_mask.png",
             "anomaly_overlay.png",
             "diagnostic_overlay.png",
+            # Grayscale + colour anomaly from our engine's post-processor.
+            "anomaly_highlight.png",
         }
         missing = expected_layers - set(report["heatmaps"].keys())
         assert not missing, f"missing heatmap layers: {missing}"

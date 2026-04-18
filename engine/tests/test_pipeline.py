@@ -36,6 +36,7 @@ def test_run_compare_diff_pair(image_pair: tuple[Path, Path]) -> None:
         "blur_mask.png",
         "anomaly_overlay.png",
         "diagnostic_overlay.png",
+        "anomaly_highlight.png",  # Upiqlo post-processor
     }
     assert expected.issubset(result.heatmaps.keys())
     for name, data in result.heatmaps.items():
