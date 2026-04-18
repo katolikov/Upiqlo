@@ -1,0 +1,28 @@
+[package]
+name = "upiqlo"
+version = "0.1.0"
+description = "Upiqlo desktop host — FR-IQA image comparison."
+authors = ["Upiqlo"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-dialog = "2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "process", "sync"] }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+
+[features]
+# This feature is used for production builds or when a dev server is not
+# specified. Enable it by default on release.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

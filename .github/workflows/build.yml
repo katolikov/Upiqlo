@@ -1,0 +1,170 @@
+# GitHub Actions matrix for Upiqlo desktop builds.
+#
+# Per project policy, this file is committed locally only and is NOT
+# pushed to GitHub unless explicitly enabled. It exists as a ready-to-use
+# template; enable it by uncommenting `push` / `pull_request` below or
+# running via `workflow_dispatch`.
+#
+# Assumes FR-IQA-Algo is checked out next to this repo so
+# engine/scripts/vendor_algorithm.py can copy upiqal/, weights/ and
+# upiqal_cli.py into engine/vendor/.
+
+name: build
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            runner: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            sidecar-exe: upiqlo-engine.exe
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            sidecar-exe: upiqlo-engine
+          - name: linux-aarch64
+            runner: ubuntu-24.04-arm
+            rust-target: aarch64-unknown-linux-gnu
+            sidecar-exe: upiqlo-engine
+          - name: macos-aarch64
+            runner: macos-14
+            rust-target: aarch64-apple-darwin
+            sidecar-exe: upiqlo-engine
+
+    steps:
+      - name: Checkout Upiqlo
+        uses: actions/checkout@v4
+        with:
+          path: Upiqlo
+
+      - name: Checkout FR-IQA-Algo (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.FRIQAALGO_REPO || 'artemkatolikov/FR-IQA-Algo' }}
+          path: FR-IQA-Algo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- System deps ------------------------------------------------------
+      - name: Install Linux build deps (GTK + WebKit)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: Upiqlo/package-lock.json
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      # --- Engine pytest (runs against the real algorithm) -----------------
+      - name: Bootstrap engine venv
+        working-directory: Upiqlo/engine
+        shell: bash
+        run: |
+          uv venv -p 3.11 .venv
+          uv pip install --python .venv -r requirements-dev.txt
+
+      - name: Vendor algorithm (upiqal + weights + upiqal_cli.py)
+        working-directory: Upiqlo/engine
+        shell: bash
+        run: |
+          .venv/bin/python scripts/vendor_algorithm.py --algo-repo ../../FR-IQA-Algo
+
+      - name: Run engine pytest suite
+        working-directory: Upiqlo/engine
+        shell: bash
+        run: |
+          .venv/bin/python -m pytest tests -q
+
+      # --- PyInstaller sidecar ---------------------------------------------
+      - name: Build PyInstaller sidecar
+        working-directory: Upiqlo/engine
+        shell: bash
+        run: |
+          .venv/bin/python scripts/build_sidecar.py --target ${{ matrix.rust-target }}
+
+      - name: Smoke-test bundled sidecar
+        working-directory: Upiqlo/engine
+        shell: bash
+        run: |
+          set -e
+          SIDECAR_DIR="dist/upiqlo-engine-${{ matrix.rust-target }}"
+          EXE="$SIDECAR_DIR/${{ matrix.sidecar-exe }}"
+          UPIQLO_ENGINE_PORT_OVERRIDE=61000 \
+          UPIQLO_ENGINE_TOKEN_OVERRIDE="ci-smoke" \
+            "$EXE" > /tmp/engine.log 2>&1 &
+          PID=$!
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -sSf http://127.0.0.1:61000/healthz > /tmp/hz 2>/dev/null; then
+              echo "healthz: $(cat /tmp/hz)"
+              break
+            fi
+            sleep 2
+          done
+          kill -9 $PID || true
+          cat /tmp/hz | grep '"algorithm_available":true'
+
+      - name: Stage sidecar for Tauri
+        working-directory: Upiqlo
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          cp -R engine/dist/upiqlo-engine-${{ matrix.rust-target }} src-tauri/binaries/
+
+      # --- UI + Tauri -------------------------------------------------------
+      - name: Install JS deps
+        working-directory: Upiqlo
+        shell: bash
+        run: npm ci
+
+      - name: Build UI
+        working-directory: Upiqlo
+        shell: bash
+        run: npm run build:ui
+
+      - name: Tauri build
+        working-directory: Upiqlo
+        shell: bash
+        run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.rust-target }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: upiqlo-${{ matrix.name }}
+          path: |
+            Upiqlo/src-tauri/target/${{ matrix.rust-target }}/release/bundle/**/*
+          if-no-files-found: warn
+          retention-days: 14

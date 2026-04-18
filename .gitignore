@@ -1,0 +1,42 @@
+# Node / Vite
+node_modules/
+ui/dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/
+Cargo.lock.bak
+
+# Python engine
+engine/.venv/
+engine/venv/
+engine/__pycache__/
+engine/**/__pycache__/
+engine/build/
+engine/dist/
+engine/vendor/
+engine/*.egg-info/
+engine/.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+
+# Editor / IDE / OS cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
+
+# Logs + runtime scratch
+*.log
+/tmp*
+
+# PyInstaller scratch
+__pycache__/
+.eggs/
+*.egg-info/

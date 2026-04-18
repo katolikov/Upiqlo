@@ -1,0 +1,21 @@
+# Pinned runtime deps for the Upiqlo engine sidecar.
+# Torch/torchvision are pulled from the CPU-only wheel index to keep installer
+# size sane (~180 MB vs ~2 GB with CUDA runtime).
+#
+# Install:
+#   uv venv -p 3.11 .venv
+#   source .venv/bin/activate
+#   uv pip install --index-strategy unsafe-best-match \
+#       --extra-index-url https://download.pytorch.org/whl/cpu \
+#       -r requirements.txt
+
+fastapi>=0.110,<0.120
+uvicorn[standard]>=0.29,<0.40
+python-multipart>=0.0.9
+pillow>=10.0
+numpy>=1.24,<3.0
+scipy>=1.10
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2,<2.5
+torchvision>=0.17,<0.20

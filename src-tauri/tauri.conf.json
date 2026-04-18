@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Upiqlo",
+  "version": "0.1.0",
+  "identifier": "com.upiqlo.desktop",
+  "build": {
+    "frontendDist": "../ui/dist",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "npm run dev:ui",
+    "beforeBuildCommand": "npm run build:ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Upiqlo",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "decorations": true,
+        "backgroundColor": "#1a1612"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "FR-IQA image comparison desktop app",
+    "longDescription": "Upiqlo is a cross-platform desktop application that wraps the UPIQAL full-reference image-quality algorithm for interactive image comparison.",
+    "resources": ["binaries/upiqlo-engine-*/**/*"]
+  }
+}
