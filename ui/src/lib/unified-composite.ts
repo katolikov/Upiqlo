@@ -1,10 +1,10 @@
 /**
  * Render the "Unified" artefact-highlight view on the frontend.
  *
- * The base is the target image in full colour (un-darkened). Each
- * enabled mask contributes its *own* jet-colormap colours on top, but
- * only at pixels whose strength is above a per-layer floor — below
- * floor contributes alpha 0 so the target shows through untinted.
+ * The base is the target image rendered as GRAYSCALE so the only
+ * colour in the final composite comes from the enabled artefact
+ * layers. Each enabled mask contributes its spec tint colour on top
+ * at pixels whose strength is above a per-layer floor.
  *
  * For structural similarity (where blue == anomaly) the layer is
  * marked `invert: true` and its strength is flipped before thresholding.
@@ -45,17 +45,17 @@ export interface UnifiedLayerSpec {
  * where relevant.
  */
 export const UNIFIED_LAYERS: UnifiedLayerSpec[] = [
-  // Floors are tuned so the blue half of the jet colormap falls below,
-  // but mid-strength green regions still qualify. Intensity is > 1 so
-  // moderate anomalies reach a readable alpha after the final clamp.
-  { key: "global_anomaly_map.png",        label: "Anomaly",     color: "#D6521F", intensity: 1.6, floor: 0.25 },
-  { key: "gibbs_ringing_mask.png",        label: "Ringing",     color: "#4F8AA3", intensity: 1.6, floor: 0.25 },
-  { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 1.6, floor: 0.25 },
-  { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 1.6, floor: 0.30 },
-  { key: "color_degradation_map.png",     label: "Color shift", color: "#B84A6C", intensity: 1.6, floor: 0.30 },
+  // Strength is now max(R,G), so any non-deep-blue jet pixel clears
+  // the floor. Intensity < 1 keeps the tint from fully covering the
+  // grayscale base so the user can still read what's underneath.
+  { key: "global_anomaly_map.png",        label: "Anomaly",     color: "#D6521F", intensity: 0.8, floor: 0.30 },
+  { key: "gibbs_ringing_mask.png",        label: "Ringing",     color: "#4F8AA3", intensity: 0.85, floor: 0.30 },
+  { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 0.85, floor: 0.30 },
+  { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 0.85, floor: 0.35 },
+  { key: "color_degradation_map.png",     label: "Color shift", color: "#B84A6C", intensity: 0.85, floor: 0.35 },
   // Structural similarity is HIGH where images agree — the anomaly is
   // the blue/low-value region, so invert the strength before thresholding.
-  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 1.6, floor: 0.40, invert: true },
+  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 0.85, floor: 0.40, invert: true },
 ];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -74,21 +74,19 @@ export interface BuildUnifiedArgs {
   enabled: Set<string>;
 }
 
-/** Load a mask and return both its strength channel and its per-pixel
- * RGB (from the jet colormap or binary white mask).
+/** Load a mask and return its per-pixel strength (0..255) plus the
+ * raw RGB (kept for potential future use).
  *
- * Strength extraction is adaptive per pixel:
- *   - If the pixel is roughly chromatic (channel spread ≥ 40), it's
- *     from a jet colourmap. In jet, low values are blue / cyan and
- *     high values are yellow / red — the anomaly axis is R − B. We
- *     encode that as `max(0, min(255, (R − B) + 128))` so pure blue
- *     maps to 0, green to ~128, and yellow/red to 255.
- *   - Otherwise the pixel is greyscale (binary mask on black), and
- *     we use the peak channel directly.
+ * Strength is adaptive so both jet-colormapped continuous maps and
+ * binary (white-on-black) masks are covered:
  *
- * This makes the blue half of the jet colormap fall BELOW the floor
- * automatically, so the target image shows through untinted there —
- * which is what the user expects ("apply only where it's not blue").
+ *   - If the pixel is chromatic (channel spread ≥ 40) it came from a
+ *     jet colormap. Any non-deep-blue tint is an anomaly — we use
+ *     `max(R, G)` as the strength so cyan (anomaly onset), green,
+ *     yellow and red all register high, while deep blue (R, G both
+ *     low) falls below a typical floor.
+ *   - Otherwise the pixel is near-greyscale — a binary mask on black,
+ *     so the peak channel equals the mask value.
  */
 function extractMaskRGBA(
   img: HTMLImageElement,
@@ -114,12 +112,11 @@ function extractMaskRGBA(
     const spread = Math.max(r, g, b) - Math.min(r, g, b);
     let s: number;
     if (spread >= 40) {
-      // Jet-ish chromatic pixel: R − B axis (blue low, red high).
-      s = r - b + 128;
-      if (s < 0) s = 0;
-      else if (s > 255) s = 255;
+      // Chromatic: max(R, G) — high for cyan / green / yellow / red,
+      // low only for deep blue (R small AND G small).
+      s = Math.max(r, g);
     } else {
-      // Near-greyscale pixel: use peak channel (binary white on black).
+      // Near-grey: binary mask.
       s = Math.max(r, g, b);
     }
     strength[j] = s | 0;
@@ -142,11 +139,17 @@ export async function buildUnified({
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
 
-    // 1. Paint the target image in full colour as the base. Pixels
-    //    where no layer exceeds its floor will show the target as-is.
+    // 1. Paint the target image as GRAYSCALE — the only colour in the
+    //    final composite comes from the enabled artefact layers.
     ctx.drawImage(base, 0, 0, w, h);
     const baseImg = ctx.getImageData(0, 0, w, h);
     const baseData = baseImg.data;
+    for (let i = 0; i < baseData.length; i += 4) {
+      const lum = 0.2989 * baseData[i] + 0.587 * baseData[i + 1] + 0.114 * baseData[i + 2];
+      baseData[i] = lum;
+      baseData[i + 1] = lum;
+      baseData[i + 2] = lum;
+    }
 
     // 2. Load each enabled mask with both its strength channel AND
     //    its original per-pixel RGB (jet colours).

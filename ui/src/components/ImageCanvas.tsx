@@ -14,8 +14,20 @@ import type { CompareReport } from "@/types/report";
 import { toast } from "@/state/toast";
 import { isTauri } from "@/lib/assets";
 
-/** "/a/b/image.png" → "/a/b/image_upiqal.png" (or with a variant
- * suffix). Works for both POSIX and Windows paths. */
+/** 8-char base36 hash generated fresh per save so every exported file
+ * has a unique filename even when the same image is saved repeatedly
+ * (different zoom, different layer toggles, different annotations). */
+function shortHash(): string {
+  // Math.random() → ~52 bits; slicing to 8 base36 chars is plenty for
+  // avoiding collisions within a single user's output folder.
+  return Math.random().toString(36).slice(2, 10);
+}
+
+/** "/a/b/image.png" → "/a/b/image_<hash>_upiqal[_variant].png".
+ * The hash goes BEFORE "upiqal" so saved copies sort next to each
+ * other but are still unique, and the `upiqal` marker is always the
+ * last segment before any variant suffix. Works for both POSIX and
+ * Windows paths. */
 function buildUpiqalDestination(sourcePath: string, variant?: string): string {
   const sep = sourcePath.includes("\\") && !sourcePath.includes("/") ? "\\" : "/";
   const lastSepIx = Math.max(sourcePath.lastIndexOf("/"), sourcePath.lastIndexOf("\\"));
@@ -23,7 +35,8 @@ function buildUpiqalDestination(sourcePath: string, variant?: string): string {
   const file = lastSepIx >= 0 ? sourcePath.slice(lastSepIx + 1) : sourcePath;
   const dotIx = file.lastIndexOf(".");
   const stem = dotIx > 0 ? file.slice(0, dotIx) : file;
-  const suffix = variant ? `_upiqal_${variant}` : "_upiqal";
+  const hash = shortHash();
+  const suffix = variant ? `_${hash}_upiqal_${variant}` : `_${hash}_upiqal`;
   const filename = `${stem}${suffix}.png`;
   return dir ? `${dir}${sep}${filename}` : filename;
 }
