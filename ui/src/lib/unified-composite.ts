@@ -169,10 +169,28 @@ export async function buildUnified({
       return canvas.toDataURL("image/png");
     }
 
-    // 3. For each pixel, alpha-composite each enabled mask's ORIGINAL
-    //    jet colours over the base, with alpha = rescaled strength-
-    //    above-floor. Below-floor pixels contribute alpha 0 → the
-    //    target image shows through untinted.
+    // 3. For each pixel, alpha-composite each enabled mask over the
+    //    base with alpha = rescaled strength-above-floor. Tint colour
+    //    depends on the layer:
+    //    - Non-invert (Anomaly / Ringing / Noise / Blur / Color) uses
+    //      the mask's *own* jet-colormap RGB so hotspots read red and
+    //      gentle anomalies read yellow/green — matches the raw
+    //      per-layer heatmap view.
+    //    - Invert (Structure) uses the spec's tint colour instead.
+    //      In structural similarity, blue == dissimilar == the
+    //      anomaly, but painting the anomalies with that blue makes
+    //      them look like "low value" and blends into cold areas. Use
+    //      the distinct layer colour (purple) so anomalies stand out.
+    const specRgb = new Map<string, { r: number; g: number; b: number }>();
+    for (const L of layers) {
+      if (!L.spec.invert) continue;
+      const c = L.spec.color.replace("#", "");
+      specRgb.set(L.spec.key, {
+        r: parseInt(c.slice(0, 2), 16),
+        g: parseInt(c.slice(2, 4), 16),
+        b: parseInt(c.slice(4, 6), 16),
+      });
+    }
     const N = w * h;
     for (let p = 0, i = 0, k = 0; p < N; p += 1, i += 4, k += 3) {
       for (const L of layers) {
@@ -187,9 +205,16 @@ export async function buildUnified({
         );
         const a = Math.min(0.9, rescaled * intensity);
         const inv = 1 - a;
-        baseData[i]     = L.rgb[k]     * a + baseData[i]     * inv;
-        baseData[i + 1] = L.rgb[k + 1] * a + baseData[i + 1] * inv;
-        baseData[i + 2] = L.rgb[k + 2] * a + baseData[i + 2] * inv;
+        let tr: number, tg: number, tb: number;
+        if (L.spec.invert) {
+          const c = specRgb.get(L.spec.key)!;
+          tr = c.r; tg = c.g; tb = c.b;
+        } else {
+          tr = L.rgb[k]; tg = L.rgb[k + 1]; tb = L.rgb[k + 2];
+        }
+        baseData[i]     = tr * a + baseData[i]     * inv;
+        baseData[i + 1] = tg * a + baseData[i + 1] * inv;
+        baseData[i + 2] = tb * a + baseData[i + 2] * inv;
       }
     }
     ctx.putImageData(baseImg, 0, 0);
