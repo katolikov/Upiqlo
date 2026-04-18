@@ -1,4 +1,4 @@
-import { FileImage, FolderOpen, ImagePlus, Images, Trash2, Upload, X } from "lucide-react";
+import { FileImage, FolderOpen, Images, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSessions, type RecentEntry } from "@/state/sessions";
 import {
@@ -43,9 +43,12 @@ export function StartScreen() {
     <div className="flex-1 min-h-0 flex items-stretch bg-surface">
       <section className="w-1/2 border-r border-surface-border flex flex-col items-center justify-center p-12 gap-8">
         <div className="text-center">
-          <div className="mx-auto w-14 h-14 rounded-xl bg-accent/15 border border-accent/40 flex items-center justify-center">
-            <ImagePlus size={28} className="text-accent" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Upiqlo"
+            className="mx-auto h-20 w-auto select-none"
+            draggable={false}
+          />
           <h2 className="mt-4 text-xl font-semibold text-text">Create new session</h2>
           <p className="mt-1 text-sm text-text-muted max-w-sm">
             Pick two images (or two folders) to compare. Each session is

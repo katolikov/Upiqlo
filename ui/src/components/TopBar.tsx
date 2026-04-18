@@ -87,9 +87,12 @@ export function TopBar() {
   return (
     <>
       <header className="h-11 border-b border-surface-border flex items-center px-3 gap-2 bg-surface-raised shrink-0">
-        <div className="w-7 h-7 rounded-md bg-accent/20 border border-accent/40 flex items-center justify-center">
-          <Activity size={16} className="text-accent" />
-        </div>
+        <img
+          src="/logo.png"
+          alt="Upiqlo"
+          className="h-6 w-auto shrink-0 select-none"
+          draggable={false}
+        />
         <div className="flex items-baseline gap-2">
           <h1 className="text-sm font-semibold tracking-wide">Upiqlo</h1>
           <span className="text-[11px] text-text-faint">FR-IQA Image Comparison</span>

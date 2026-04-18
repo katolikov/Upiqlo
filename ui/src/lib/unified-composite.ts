@@ -45,14 +45,17 @@ export interface UnifiedLayerSpec {
  * where relevant.
  */
 export const UNIFIED_LAYERS: UnifiedLayerSpec[] = [
-  { key: "global_anomaly_map.png",        label: "Anomaly",     color: "#D6521F", intensity: 1.0, floor: 0.35 },
-  { key: "gibbs_ringing_mask.png",        label: "Ringing",     color: "#4F8AA3", intensity: 1.0, floor: 0.35 },
-  { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 1.0, floor: 0.35 },
-  { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 1.0, floor: 0.40 },
-  { key: "color_degradation_map.png",     label: "Color shift", color: "#B84A6C", intensity: 1.0, floor: 0.40 },
+  // Floors are tuned so the blue half of the jet colormap falls below,
+  // but mid-strength green regions still qualify. Intensity is > 1 so
+  // moderate anomalies reach a readable alpha after the final clamp.
+  { key: "global_anomaly_map.png",        label: "Anomaly",     color: "#D6521F", intensity: 1.6, floor: 0.25 },
+  { key: "gibbs_ringing_mask.png",        label: "Ringing",     color: "#4F8AA3", intensity: 1.6, floor: 0.25 },
+  { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 1.6, floor: 0.25 },
+  { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 1.6, floor: 0.30 },
+  { key: "color_degradation_map.png",     label: "Color shift", color: "#B84A6C", intensity: 1.6, floor: 0.30 },
   // Structural similarity is HIGH where images agree — the anomaly is
   // the blue/low-value region, so invert the strength before thresholding.
-  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 1.0, floor: 0.50, invert: true },
+  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 1.6, floor: 0.40, invert: true },
 ];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -166,6 +169,15 @@ export async function buildUnified({
     }
 
     if (layers.length === 0) {
+      // Zero enabled layers → render the target as plain grayscale so
+      // the user sees the image content without any colour distraction.
+      for (let i = 0; i < baseData.length; i += 4) {
+        const lum = 0.2989 * baseData[i] + 0.587 * baseData[i + 1] + 0.114 * baseData[i + 2];
+        baseData[i] = lum;
+        baseData[i + 1] = lum;
+        baseData[i + 2] = lum;
+      }
+      ctx.putImageData(baseImg, 0, 0);
       return canvas.toDataURL("image/png");
     }
 

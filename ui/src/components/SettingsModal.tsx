@@ -100,9 +100,17 @@ export function SettingsModal({ open, onClose }: Props) {
               About
             </h3>
             <div className="rounded-md border border-surface-border bg-surface p-3 text-[12px] text-text-muted space-y-2">
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-text font-medium">Upiqlo</span>
-                <span className="tabular-nums">v0.5.1</span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <img
+                    src="/logo.png"
+                    alt="Upiqlo"
+                    className="h-7 w-auto select-none"
+                    draggable={false}
+                  />
+                  <span className="text-text font-medium">Upiqlo</span>
+                </div>
+                <span className="tabular-nums">v0.5.12</span>
               </div>
               <div>
                 Cross-platform native FR-IQA viewer built around the UPIQAL
