@@ -331,13 +331,14 @@ export function SingleCompareMode({ session }: Props) {
         },
         report,
         variant: layerSlug(session.layer),
+        annotations: session.annotations,
       });
       toast("success", writtenPath ? `Saved to ${writtenPath}` : `Saved ${filename}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast("error", `Save failed: ${msg}`);
     }
-  }, [middleSrc, refSrc, report, session.layer, session.targetPath, tgtSrc]);
+  }, [middleSrc, refSrc, report, session.annotations, session.layer, session.targetPath, tgtSrc]);
 
   const actionCluster = (
     <div className="flex items-center gap-1.5">

@@ -227,7 +227,7 @@ interface SessionStore {
   hydrateSession: (session: Session) => string;
   openFromRecent: (entry: RecentEntry) => string;
   closeSession: (id: string) => void;
-  setActive: (id: string) => void;
+  setActive: (id: string | null) => void;
   renameSession: (id: string, title: string) => void;
 
   // single

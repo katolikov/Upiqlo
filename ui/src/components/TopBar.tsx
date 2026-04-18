@@ -36,6 +36,7 @@ export function TopBar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openSession = useSessions((s) => s.openSession);
   const hydrateSession = useSessions((s) => s.hydrateSession);
+  const setActive = useSessions((s) => s.setActive);
   const activeSession = useSessions((s) => {
     const a = s.sessions.find((x) => x.id === s.activeId);
     return a ?? null;
@@ -87,12 +88,19 @@ export function TopBar() {
   return (
     <>
       <header className="h-11 border-b border-surface-border flex items-center px-3 gap-2 bg-surface-raised shrink-0">
-        <img
-          src="/logo.png"
-          alt="Upiqlo"
-          className="h-6 w-auto shrink-0 select-none"
-          draggable={false}
-        />
+        <button
+          type="button"
+          onClick={() => setActive(null)}
+          className="flex items-center shrink-0 rounded transition-opacity hover:opacity-80"
+          title="Go to Start screen"
+        >
+          <img
+            src="/logo.png"
+            alt="Upiqlo — go to Start"
+            className="h-6 w-auto select-none"
+            draggable={false}
+          />
+        </button>
         <div className="flex items-baseline gap-2">
           <h1 className="text-sm font-semibold tracking-wide">Upiqlo</h1>
           <span className="text-[11px] text-text-faint">FR-IQA Image Comparison</span>

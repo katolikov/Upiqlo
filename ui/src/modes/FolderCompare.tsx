@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileImage, Play, RotateCw, XCircle } from "lucide-react";
+import { ChevronLeft, Download, FileImage, Folder as FolderIcon, Play, RotateCw, XCircle } from "lucide-react";
+import { isTauri } from "@/lib/assets";
 import { saveCombinedImage } from "@/lib/save-combined";
 import { heatmapDataUrl, scanFolders } from "@/lib/api";
 import { streamCompare } from "@/lib/stream";
@@ -361,13 +362,14 @@ export function FolderCompareMode({ session }: Props) {
         },
         report,
         variant: layerSlug(session.layer),
+        annotations,
       });
       toast("success", writtenPath ? `Saved to ${writtenPath}` : `Saved ${filename}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast("error", `Save failed: ${msg}`);
     }
-  }, [middleSrc, refSrc, report, session.activeTargetPath, session.layer, tgtSrc]);
+  }, [annotations, middleSrc, refSrc, report, session.activeTargetPath, session.layer, tgtSrc]);
 
   const actionCluster = (
     <div className="flex items-center gap-1.5">
@@ -445,8 +447,8 @@ export function FolderCompareMode({ session }: Props) {
 
       <div className="flex-1 flex min-h-0 min-w-0">
         <FileList
-          label="Folder A"
-          files={referenceFiles}
+          rootDir={session.referenceDir}
+          fallbackFiles={referenceFiles}
           active={session.activeReferencePath}
           onPick={(p) => setFolderActiveRef(session.id, p)}
           className="border-r border-surface-border"
@@ -518,8 +520,8 @@ export function FolderCompareMode({ session }: Props) {
         </div>
 
         <FileList
-          label="Folder B"
-          files={targetFiles}
+          rootDir={session.targetDir}
+          fallbackFiles={targetFiles}
           active={session.activeTargetPath}
           onPick={(p) => setFolderActiveTgt(session.id, p)}
         />
@@ -534,19 +536,125 @@ export function FolderCompareMode({ session }: Props) {
   );
 }
 
+const IMAGE_EXTS = new Set([
+  ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp",
+  ".npy", ".raw", ".bin", ".yuv", ".nv21", ".nv12",
+]);
+
+function hasImageExt(name: string): boolean {
+  const lower = name.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  return dot >= 0 && IMAGE_EXTS.has(lower.slice(dot));
+}
+
+function joinPath(dir: string, name: string): string {
+  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  const trimmed = dir.endsWith(sep) ? dir.slice(0, -1) : dir;
+  return `${trimmed}${sep}${name}`;
+}
+
+function parentPath(p: string | null): string | null {
+  if (!p) return null;
+  const ix = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  if (ix <= 0) return null;
+  const parent = p.slice(0, ix);
+  return parent || null;
+}
+
+interface FileList_Entry { name: string; path: string; isDir: boolean; }
+
+/**
+ * Recursive directory browser for one side of the folder-compare
+ * workspace. Starts at `rootDir` and uses the Tauri fs plugin's
+ * readDir to list contents of the currently-viewed directory. The
+ * user can drill into any subdirectory and climb back up via the
+ * breadcrumb row. Picking a file sets this side's active image.
+ *
+ * `fallbackFiles` is used when we're not running inside Tauri (dev-
+ * browser mode), where readDir isn't available — we fall back to the
+ * flat file list from the engine's scan.
+ */
 function FileList({
-  label,
-  files,
+  rootDir,
+  fallbackFiles,
   active,
   onPick,
   className,
 }: {
-  label: string;
-  files: string[];
+  rootDir: string | null;
+  fallbackFiles: string[];
   active: string | null;
   onPick: (path: string) => void;
   className?: string;
 }) {
+  const [cursor, setCursor] = useState<string | null>(rootDir);
+  const [entries, setEntries] = useState<FileList_Entry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  // Keep the cursor in sync with the session root when the user
+  // changes the folder path from the header.
+  useEffect(() => {
+    setCursor(rootDir);
+  }, [rootDir]);
+
+  useEffect(() => {
+    if (!cursor) {
+      setEntries([]);
+      return;
+    }
+    if (!isTauri()) {
+      // Browser dev: fall back to the scan's flat list.
+      setEntries(
+        fallbackFiles.map((p) => ({
+          name: p.split(/[\\/]/).filter(Boolean).pop() ?? p,
+          path: p,
+          isDir: false,
+        })),
+      );
+      return;
+    }
+    let cancelled = false;
+    setError(null);
+    (async () => {
+      try {
+        const fs = await import("@tauri-apps/plugin-fs");
+        const raw = await fs.readDir(cursor);
+        if (cancelled) return;
+        const mapped: FileList_Entry[] = raw
+          .filter((e) => e.name && !e.name.startsWith("."))
+          .map((e) => ({
+            name: e.name!,
+            path: joinPath(cursor, e.name!),
+            isDir: Boolean(e.isDirectory),
+          }))
+          .filter((e) => e.isDir || hasImageExt(e.name));
+        mapped.sort((a, b) => {
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+          return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        });
+        setEntries(mapped);
+      } catch (e) {
+        if (cancelled) return;
+        setError((e as Error).message);
+        setEntries([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cursor, fallbackFiles]);
+
+  const atRoot = !rootDir || cursor === rootDir;
+  const currentLabel = cursor ? `/../${basename(cursor)}` : "(no folder)";
+
+  const goUp = () => {
+    if (!cursor || !rootDir) return;
+    if (cursor === rootDir) return; // stay inside session root
+    const parent = parentPath(cursor);
+    if (parent && parent.length >= rootDir.length) setCursor(parent);
+    else setCursor(rootDir);
+  };
+
   return (
     <aside
       className={cn(
@@ -554,33 +662,52 @@ function FileList({
         className,
       )}
     >
-      <div className="h-8 shrink-0 px-3 flex items-center text-[11px] uppercase tracking-wider text-text-faint border-b border-surface-border">
-        {label}
+      <div className="h-8 shrink-0 px-2 flex items-center gap-1 text-[11px] text-text-muted border-b border-surface-border">
+        <button
+          type="button"
+          onClick={goUp}
+          disabled={atRoot}
+          className="p-0.5 rounded hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Up one level"
+        >
+          <ChevronLeft size={12} />
+        </button>
+        <span className="truncate font-medium" title={cursor ?? undefined}>
+          {currentLabel}
+        </span>
       </div>
 
-      {files.length === 0 ? (
+      {error ? (
+        <div className="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-signal-danger">
+          {error}
+        </div>
+      ) : entries.length === 0 ? (
         <div className="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-text-faint">
-          (no files)
+          (empty)
         </div>
       ) : (
         <ul className="flex-1 overflow-y-auto min-h-0">
-          {files.map((p) => {
-            const activeRow = active === p;
+          {entries.map((e) => {
+            const activeRow = !e.isDir && active === e.path;
             return (
-              <li key={p}>
+              <li key={e.path}>
                 <button
                   type="button"
-                  onClick={() => onPick(p)}
+                  onClick={() => (e.isDir ? setCursor(e.path) : onPick(e.path))}
                   className={cn(
                     "w-full text-left px-3 py-1.5 flex items-center gap-2 text-[11px] border-l-2 transition-colors",
                     activeRow
                       ? "bg-accent/15 text-accent border-accent"
                       : "text-text-muted border-transparent hover:bg-surface-hover/50 hover:text-text",
                   )}
-                  title={p}
+                  title={e.path}
                 >
-                  <FileImage size={11} className="shrink-0 text-text-faint" />
-                  <span className="truncate">{basename(p)}</span>
+                  {e.isDir ? (
+                    <FolderIcon size={11} className="shrink-0 text-accent/80" />
+                  ) : (
+                    <FileImage size={11} className="shrink-0 text-text-faint" />
+                  )}
+                  <span className="truncate">{e.name}</span>
                 </button>
               </li>
             );

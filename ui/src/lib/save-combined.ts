@@ -10,8 +10,47 @@
 
 import { isTauri } from "@/lib/assets";
 import type { CompareReport } from "@/types/report";
+import type { BoundingBox } from "@/state/sessions";
 
 const FOOTER_H = 140;
+
+/** Draw annotation rectangles (halo + coloured stroke + label chip) in
+ * the sub-rectangle `(ox, oy, w, h)` of the combined canvas. Matches
+ * the per-pane ImageCanvas treatment so the saved file looks like
+ * what was on screen. */
+function drawAnnotationsOn(
+  ctx: CanvasRenderingContext2D,
+  boxes: BoundingBox[],
+  ox: number,
+  oy: number,
+  w: number,
+  h: number,
+): void {
+  const stroke = Math.max(2, Math.round(Math.min(w, h) / 400));
+  ctx.save();
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    const labelText = b.label ?? `Region ${i + 1}`;
+    const rx = ox + b.x * w;
+    const ry = oy + b.y * h;
+    const rw = b.w * w;
+    const rh = b.h * h;
+    ctx.lineWidth = stroke + 2;
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.lineWidth = stroke;
+    ctx.strokeStyle = b.color;
+    ctx.strokeRect(rx, ry, rw, rh);
+    const fontPx = Math.max(11, Math.round(h / 70));
+    ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
+    const textW = ctx.measureText(labelText).width;
+    ctx.fillStyle = b.color;
+    ctx.fillRect(rx, ry - fontPx - 6, textW + 12, fontPx + 6);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(labelText, rx + 6, ry - 6);
+  }
+  ctx.restore();
+}
 
 function shortHash(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -149,6 +188,10 @@ export interface SaveCombinedArgs {
   report?: CompareReport | null;
   /** Suffix between the hash and the extension, e.g. `anomaly_map`. */
   variant?: string;
+  /** Annotations to burn into every pane (they're stored in normalised
+   * [0, 1] coordinates, so the same list renders correctly on all
+   * three panes regardless of their individual sizes). */
+  annotations?: BoundingBox[];
 }
 
 /**
@@ -163,6 +206,7 @@ export async function saveCombinedImage({
   labels,
   report = null,
   variant,
+  annotations,
 }: SaveCombinedArgs): Promise<{ blob: Blob; writtenPath: string | null; filename: string }> {
   const [L, M, R] = await Promise.all([
     loadBytesAsImage(leftSrc),
@@ -207,6 +251,14 @@ export async function saveCombinedImage({
   ctx.drawImage(L, 0, LABEL_H, lW, H);
   ctx.drawImage(M, lW, LABEL_H, mW, H);
   ctx.drawImage(R, lW + mW, LABEL_H, rW, H);
+
+  // Annotations are in normalised image coords, so we can draw them
+  // at the same relative position in each pane's sub-rectangle.
+  if (annotations && annotations.length > 0) {
+    drawAnnotationsOn(ctx, annotations, 0, LABEL_H, lW, H);
+    drawAnnotationsOn(ctx, annotations, lW, LABEL_H, mW, H);
+    drawAnnotationsOn(ctx, annotations, lW + mW, LABEL_H, rW, H);
+  }
 
   // Separator lines between panes.
   ctx.fillStyle = "#3a3230";

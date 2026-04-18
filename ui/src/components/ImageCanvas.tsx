@@ -940,9 +940,26 @@ export function ColorPalette({
   value: string;
   onChange: (c: string) => void;
 }) {
+  // Extra user-added colours live in local component state: they stay
+  // for this tab's lifetime and re-seed on the next run so users can
+  // add as many custom hues as they like without polluting the spec
+  // palette.
+  const [custom, setCustom] = useState<string[]>([]);
+  const pickerRef = useRef<HTMLInputElement>(null);
+  // Whenever the native colour dialog emits a final value we push it
+  // into the custom list (unless it's already there) and activate it.
+  const addCustom = useCallback(
+    (hex: string) => {
+      const norm = hex.toLowerCase();
+      setCustom((prev) => (prev.includes(norm) ? prev : [...prev, norm]));
+      onChange(norm);
+    },
+    [onChange],
+  );
+  const palette = [...BOX_COLORS, ...custom];
   return (
     <div className="flex items-center gap-1">
-      {BOX_COLORS.map((c) => (
+      {palette.map((c) => (
         <button
           key={c}
           type="button"
@@ -957,6 +974,24 @@ export function ColorPalette({
           title={c}
         />
       ))}
+      <button
+        type="button"
+        onClick={() => pickerRef.current?.click()}
+        className="w-5 h-5 rounded border border-dashed border-surface-border-strong text-text-muted hover:text-text hover:border-surface-border flex items-center justify-center transition-colors"
+        title="Add custom colour"
+      >
+        <Plus size={11} />
+      </button>
+      <input
+        ref={pickerRef}
+        type="color"
+        // Keep the dialog truly hidden — we only use it to fire the
+        // system colour picker; the selected value is merged back into
+        // our palette.
+        className="sr-only"
+        tabIndex={-1}
+        onChange={(e) => addCustom(e.target.value)}
+      />
     </div>
   );
 }
