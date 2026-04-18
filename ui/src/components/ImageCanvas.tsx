@@ -181,6 +181,22 @@ export function ImageCanvas({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // If the pointer went down on an interactive UI element (the
+      // overlay buttons, the Output dropdown trigger, a legend chip,
+      // an annotation rectangle, etc.) let that element handle the
+      // click — don't start panning or a rectangle-draw, and do NOT
+      // call setPointerCapture (which would otherwise steal pointerup
+      // and click events from the target).
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        target.closest(
+          "button, a, select, input, textarea, [data-ui], [role='button']",
+        )
+      ) {
+        return;
+      }
+
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const px = e.clientX - rect.left;
@@ -288,21 +304,96 @@ export function ImageCanvas({
 
   // --- Save -----------------------------------------------------------
   //
-  // Canvas security: image <img src=…> from Tauri's asset:// protocol
-  // is cross-origin to the webview, and without CORS headers a canvas
-  // that has drawImage()'d it becomes "tainted" — toBlob() throws.
+  // Multi-stage strategy to survive every kind of src the canvas might
+  // see (data:, blob:, asset://, http://127.0.0.1:<engine>):
   //
-  // Workaround: fetch() the URL (works for asset://, data:, blob: and
-  // http(s)://localhost), turn the bytes into a Blob, load that via a
-  // blob: URL (same-origin) and draw *that*. Only annotations drawn on
-  // top of the bytes are ever composited, so nothing leaks.
+  //   1) Prefer drawing the already-loaded imgRef element directly. For
+  //      data:/blob:/http:// sources this is always CORS-clean and
+  //      toBlob() succeeds. For Tauri's asset:// it usually works too
+  //      (assetProtocol serves CORS headers on recent Tauri 2.x).
+  //
+  //   2) If step 1 throws a SecurityError (tainted canvas), fall back
+  //      to fetch(src) + createObjectURL(blob) and redraw through a
+  //      blob: URL (always same-origin).
+  //
+  // Every failure is surfaced as an error toast so the user sees why
+  // the save didn't happen.
+  const drawAnnotations = useCallback(
+    (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+      const stroke = Math.max(2, Math.round(Math.min(w, h) / 400));
+      for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i];
+        const labelText = b.label ?? `Region ${i + 1}`;
+        const rx = b.x * w;
+        const ry = b.y * h;
+        const rw = b.w * w;
+        const rh = b.h * h;
+        ctx.lineWidth = stroke + 2;
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.strokeRect(rx, ry, rw, rh);
+        ctx.lineWidth = stroke;
+        ctx.strokeStyle = b.color;
+        ctx.strokeRect(rx, ry, rw, rh);
+        const fontPx = Math.max(11, Math.round(h / 70));
+        ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
+        const textW = ctx.measureText(labelText).width;
+        ctx.fillStyle = b.color;
+        ctx.fillRect(rx, ry - fontPx - 6, textW + 12, fontPx + 6);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(labelText, rx + 6, ry - 6);
+      }
+    },
+    [boxes],
+  );
+
   const handleSave = useCallback(async () => {
     if (!src || !onSave) return;
-    try {
-      const blobIn = await fetch(src).then((r) => {
-        if (!r.ok) throw new Error(`fetch ${r.status}`);
-        return r.blob();
+    const drawToBlob = (img: HTMLImageElement): Promise<Blob> =>
+      new Promise((resolve, reject) => {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        if (w === 0 || h === 0) {
+          reject(new Error("image not loaded"));
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("2d context unavailable"));
+          return;
+        }
+        try {
+          ctx.drawImage(img, 0, 0, w, h);
+          drawAnnotations(ctx, w, h);
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error("toBlob returned null"));
+          }, "image/png");
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
       });
+
+    try {
+      // --- Path 1: use the already-loaded imgRef -----------------
+      const el = imgRef.current;
+      if (el && el.complete && el.naturalWidth > 0) {
+        try {
+          const blob = await drawToBlob(el);
+          onSave(blob, `${saveFilenameBase}.png`);
+          return;
+        } catch (err) {
+          // Likely a tainted canvas — fall through to path 2.
+          console.warn("direct draw failed, falling back to fetch", err);
+        }
+      }
+
+      // --- Path 2: fetch bytes then redraw via blob: URL ---------
+      const resp = await fetch(src);
+      if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+      const blobIn = await resp.blob();
       const objectUrl = URL.createObjectURL(blobIn);
       try {
         const image = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -311,40 +402,8 @@ export function ImageCanvas({
           img.onerror = () => reject(new Error("image load failed"));
           img.src = objectUrl;
         });
-        const canvas = document.createElement("canvas");
-        canvas.width = image.naturalWidth;
-        canvas.height = image.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("2d context unavailable");
-        ctx.drawImage(image, 0, 0);
-        // Draw each annotation: white halo under coloured stroke for
-        // contrast on busy backgrounds, then optional label.
-        const stroke = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) / 400));
-        for (const b of boxes) {
-          const rx = b.x * canvas.width;
-          const ry = b.y * canvas.height;
-          const rw = b.w * canvas.width;
-          const rh = b.h * canvas.height;
-          ctx.lineWidth = stroke + 2;
-          ctx.strokeStyle = "rgba(255,255,255,0.85)";
-          ctx.strokeRect(rx, ry, rw, rh);
-          ctx.lineWidth = stroke;
-          ctx.strokeStyle = b.color;
-          ctx.strokeRect(rx, ry, rw, rh);
-          if (b.label) {
-            const fontPx = Math.max(12, Math.round(canvas.height / 60));
-            ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
-            ctx.fillStyle = "rgba(0,0,0,0.55)";
-            ctx.fillRect(rx, ry, ctx.measureText(b.label).width + 10, fontPx + 6);
-            ctx.fillStyle = "#ffffff";
-            ctx.fillText(b.label, rx + 5, ry + fontPx);
-          }
-        }
-        const outBlob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob((b) => resolve(b), "image/png"),
-        );
-        if (!outBlob) throw new Error("toBlob returned null");
-        onSave(outBlob, `${saveFilenameBase}.png`);
+        const out = await drawToBlob(image);
+        onSave(out, `${saveFilenameBase}.png`);
       } finally {
         URL.revokeObjectURL(objectUrl);
       }
@@ -353,7 +412,7 @@ export function ImageCanvas({
       console.error("save failed", err);
       toast("error", `Save failed: ${msg}`);
     }
-  }, [boxes, onSave, saveFilenameBase, src]);
+  }, [drawAnnotations, onSave, saveFilenameBase, src]);
 
   // --- Scrollbars -----------------------------------------------------
   const hasHScroll = !!box && box.w > cont.w + 0.5;
@@ -394,18 +453,19 @@ export function ImageCanvas({
     [box, cont.h, cont.w, hasVScroll, natural, sessionId, setTransform, transform],
   );
 
-  // Use CSS transform translate+scale so the browser GPU-scales the
-  // texture without re-sampling per frame → much more stable zoom.
-  // Before `natural` is known the img still needs to participate in
-  // layout so the browser actually downloads it; we hide it with
-  // opacity:0 rather than display:none.
+  // Render the image at its fit-scaled size directly (width/height in
+  // CSS pixels) plus a translate. This is the browser's default image
+  // pipeline and consistently fills the pane; the earlier approach of
+  // using a CSS transform scale() on top of natural size rendered at
+  // the wrong position under WebKit. Before `natural` is known the img
+  // still needs to participate in layout so the browser actually
+  // downloads it — we hide it with opacity:0 rather than display:none.
   const scaleFactor = natural && box ? box.w / natural.w : 1;
   const imgStyle: React.CSSProperties = box && natural
     ? {
-        transform: `translate(${box.x}px, ${box.y}px) scale(${scaleFactor})`,
-        transformOrigin: "0 0",
-        width: `${natural.w}px`,
-        height: `${natural.h}px`,
+        transform: `translate(${box.x}px, ${box.y}px)`,
+        width: `${box.w}px`,
+        height: `${box.h}px`,
         imageRendering: scaleFactor >= 2 ? "pixelated" : "auto",
       }
     : {
