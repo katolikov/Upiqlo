@@ -716,7 +716,9 @@ export function ImageCanvas({
       }
     >
       {headerSlot ? (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">{headerSlot}</div>
+        // z-40 (> the annotation SVG's z-30) so the dropdown menu and
+        // legend chips render above any drawn rectangles.
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40">{headerSlot}</div>
       ) : label ? (
         <div className="absolute top-2 left-2 z-20 px-2 py-0.5 text-[11px] font-medium text-text-muted bg-surface/80 backdrop-blur rounded border border-surface-border pointer-events-none">
           {label}

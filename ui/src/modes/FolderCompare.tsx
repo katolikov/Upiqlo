@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileImage, Play, RotateCw, XCircle } from "lucide-react";
+import { Download, FileImage, Play, RotateCw, XCircle } from "lucide-react";
+import { saveCombinedImage } from "@/lib/save-combined";
 import { heatmapDataUrl, scanFolders } from "@/lib/api";
 import { streamCompare } from "@/lib/stream";
 import { resolveImageSrc } from "@/lib/assets";
@@ -342,6 +343,32 @@ export function FolderCompareMode({ session }: Props) {
     if (session.activeReferencePath && session.activeTargetPath && !running) runPair();
   }, [runPair, running, session.activeReferencePath, session.activeTargetPath]);
 
+  const saveAll = useCallback(async () => {
+    if (!refSrc || !tgtSrc || !middleSrc || !session.activeTargetPath) {
+      toast("error", "Nothing to save yet — run this pair first");
+      return;
+    }
+    try {
+      const { writtenPath, filename } = await saveCombinedImage({
+        targetPath: session.activeTargetPath,
+        leftSrc: refSrc,
+        middleSrc,
+        rightSrc: tgtSrc,
+        labels: {
+          left: "Left · Reference",
+          middle: `Output · ${labelFor(session.layer)}`,
+          right: "Right · Target",
+        },
+        report,
+        variant: layerSlug(session.layer),
+      });
+      toast("success", writtenPath ? `Saved to ${writtenPath}` : `Saved ${filename}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast("error", `Save failed: ${msg}`);
+    }
+  }, [middleSrc, refSrc, report, session.activeTargetPath, session.layer, tgtSrc]);
+
   const actionCluster = (
     <div className="flex items-center gap-1.5">
       <button
@@ -352,6 +379,15 @@ export function FolderCompareMode({ session }: Props) {
         title="Reload input images and re-run this pair"
       >
         <RotateCw size={12} /> Reload
+      </button>
+      <button
+        type="button"
+        onClick={saveAll}
+        disabled={!report || !refSrc || !tgtSrc || !middleSrc}
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-surface-border text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed text-[12px] transition-colors"
+        title="Save combined Left + Output + Right PNG next to the target image"
+      >
+        <Download size={12} /> Save All
       </button>
       {running ? (
         <button
@@ -455,7 +491,7 @@ export function FolderCompareMode({ session }: Props) {
             footerReport={report}
           />
           {session.layer === "diagnostic_overlay.png" && report && (
-            <div className="absolute top-12 left-2 z-10 pointer-events-auto">
+            <div className="absolute top-12 left-2 z-40 pointer-events-auto">
               <UnifiedToggles
                 enabled={unifiedToggled}
                 onToggle={toggleLayer}

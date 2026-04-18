@@ -128,14 +128,16 @@ export function SettingsModal({ open, onClose }: Props) {
                 label="GitHub repository"
                 href="https://github.com/katolikov/FR-IQA-Algo"
               />
-              <InfoLink
-                label="License"
-                href="https://github.com/katolikov/FR-IQA-Algo/blob/main/LICENSE"
-              />
+              <div className="flex items-center justify-between px-2.5 py-1.5 rounded border border-surface-border bg-surface text-text-muted">
+                <span>License</span>
+                <span className="text-[10px] uppercase tracking-wider text-text-faint">
+                  in progress
+                </span>
+              </div>
               <div className="flex items-center justify-between px-2.5 py-1.5 rounded border border-surface-border bg-surface text-text-muted">
                 <span>Check for Updates</span>
                 <span className="text-[10px] uppercase tracking-wider text-text-faint">
-                  coming soon
+                  in progress
                 </span>
               </div>
             </div>
