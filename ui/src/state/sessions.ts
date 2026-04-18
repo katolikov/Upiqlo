@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import type { CompareReport } from "@/types/report";
-import type { FolderScanResponse, FolderPair } from "@/types/folders";
+import type { FolderScanResponse } from "@/types/folders";
 import { usePreferences, type Preferences } from "./preferences";
+import { autoSessionName } from "@/lib/session-name";
 
 export type SessionMode = "single" | "folder";
 
@@ -80,12 +81,20 @@ export interface FolderSession {
   referenceDir: string | null;
   targetDir: string | null;
   scan: FolderScanResponse | null;
-  activePairIndex: number;
+  /** Independent selection for the A-side explorer (absolute path). */
+  activeReferencePath: string | null;
+  /** Independent selection for the B-side explorer (absolute path). */
+  activeTargetPath: string | null;
   results: Record<string, CompareStatus>;
   layer: HeatmapLayer;
   params: Preferences;
-  /** Annotations are keyed by pair_id so each image pair has its own. */
+  /** Annotations keyed by "<ref>|<tgt>" so each (ref, tgt) pick has its own set. */
   annotationsByPair: Record<string, BoundingBox[]>;
+}
+
+/** Stable synthetic pair key for the (ref, tgt) selection in Folder mode. */
+export function folderPairKey(ref: string | null, tgt: string | null): string {
+  return `${ref ?? ""}|${tgt ?? ""}`;
 }
 
 export type Session = SingleSession | FolderSession;
@@ -204,7 +213,8 @@ export function buildSession(
     referenceDir: seed?.referenceDir ?? null,
     targetDir: seed?.targetDir ?? null,
     scan: null,
-    activePairIndex: 0,
+    activeReferencePath: null,
+    activeTargetPath: null,
     results: {},
     annotationsByPair: seed?.annotationsByPair ?? {},
   };
@@ -233,7 +243,8 @@ interface SessionStore {
   // folder
   setFolderDirs: (id: string, ref: string | null, tgt: string | null) => void;
   setFolderScan: (id: string, scan: FolderScanResponse | null) => void;
-  setFolderActivePair: (id: string, index: number) => void;
+  setFolderActiveRef: (id: string, path: string | null) => void;
+  setFolderActiveTgt: (id: string, path: string | null) => void;
   setFolderPairStatus: (
     id: string,
     pairId: string,
@@ -264,7 +275,6 @@ interface SessionStore {
 
   // selectors
   getActive: () => Session | null;
-  getFolderActivePair: (id: string) => FolderPair | null;
   getAnnotations: (id: string, pairId?: string) => BoundingBox[];
 }
 
@@ -280,11 +290,8 @@ export const useSessions = create<SessionStore>((set, get) => ({
       pyramid: usePreferences.getState().pyramid,
       featureSide: usePreferences.getState().featureSide,
     };
-    const session = buildSession(
-      mode,
-      title ?? (mode === "single" ? "New Comparison" : "New Folder Compare"),
-      snapshot,
-    );
+    // Auto-name sessions: "<word>_<hash>_<YYYY-MM-DD>".
+    const session = buildSession(mode, title ?? autoSessionName(), snapshot);
     set((s) => ({ sessions: [...s.sessions, session], activeId: session.id }));
     return session.id;
   },
@@ -366,25 +373,67 @@ export const useSessions = create<SessionStore>((set, get) => ({
     set((s) => ({
       sessions: s.sessions.map((sess) =>
         sess.id === id && sess.mode === "folder"
-          ? { ...sess, referenceDir: ref, targetDir: tgt, scan: null, results: {}, activePairIndex: 0 }
+          ? {
+              ...sess,
+              referenceDir: ref,
+              targetDir: tgt,
+              scan: null,
+              results: {},
+              activeReferencePath: null,
+              activeTargetPath: null,
+            }
           : sess,
       ),
     })),
 
   setFolderScan: (id, scan) =>
     set((s) => ({
+      sessions: s.sessions.map((sess) => {
+        if (sess.id !== id || sess.mode !== "folder") return sess;
+        // Keep any prior A/B selection if those files still exist in the
+        // fresh scan; otherwise clear.
+        const refFiles = scan
+          ? new Set([
+              ...scan.pairs.map((p) => p.reference_path),
+              ...scan.unmatched_reference,
+            ])
+          : null;
+        const tgtFiles = scan
+          ? new Set([
+              ...scan.pairs.map((p) => p.target_path),
+              ...scan.unmatched_target,
+            ])
+          : null;
+        return {
+          ...sess,
+          scan,
+          results: {},
+          activeReferencePath:
+            refFiles && sess.activeReferencePath && refFiles.has(sess.activeReferencePath)
+              ? sess.activeReferencePath
+              : null,
+          activeTargetPath:
+            tgtFiles && sess.activeTargetPath && tgtFiles.has(sess.activeTargetPath)
+              ? sess.activeTargetPath
+              : null,
+        };
+      }),
+    })),
+
+  setFolderActiveRef: (id, path) =>
+    set((s) => ({
       sessions: s.sessions.map((sess) =>
         sess.id === id && sess.mode === "folder"
-          ? { ...sess, scan, activePairIndex: 0, results: {} }
+          ? { ...sess, activeReferencePath: path }
           : sess,
       ),
     })),
 
-  setFolderActivePair: (id, index) =>
+  setFolderActiveTgt: (id, path) =>
     set((s) => ({
       sessions: s.sessions.map((sess) =>
         sess.id === id && sess.mode === "folder"
-          ? { ...sess, activePairIndex: Math.max(0, index) }
+          ? { ...sess, activeTargetPath: path }
           : sess,
       ),
     })),
@@ -489,12 +538,6 @@ export const useSessions = create<SessionStore>((set, get) => ({
     return sessions.find((s) => s.id === activeId) ?? null;
   },
 
-  getFolderActivePair: (id) => {
-    const sess = get().sessions.find((s) => s.id === id);
-    if (!sess || sess.mode !== "folder" || !sess.scan) return null;
-    return sess.scan.pairs[sess.activePairIndex] ?? null;
-  },
-
   getAnnotations: (id, pairId) => {
     const sess = get().sessions.find((s) => s.id === id);
     if (!sess) return [];
@@ -503,7 +546,3 @@ export const useSessions = create<SessionStore>((set, get) => ({
     return sess.annotationsByPair[key] ?? [];
   },
 }));
-
-export function pairIdFor(pair: FolderPair): string {
-  return pair.label;
-}

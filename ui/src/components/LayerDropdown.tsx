@@ -6,15 +6,14 @@ import { HEATMAP_LAYERS, type HeatmapLayer } from "@/state/sessions";
 interface Props {
   value: HeatmapLayer;
   onChange: (layer: HeatmapLayer) => void;
-  /** When provided, unavailable layers are greyed out. */
   available?: Set<string>;
 }
 
 /**
- * Clickable text label above the middle pane that opens a dropdown of
- * every output layer. Picking a layer DOES NOT touch the viewport
- * transform — pan/zoom is preserved across switches (the viewport state
- * is per-session, not per-layer).
+ * Single-click pill above the middle output pane: the label and the
+ * dropdown trigger are fused into one element (no separate "Output:"
+ * caption). Picking a layer never touches the viewport transform, so
+ * pan/zoom survives the switch.
  */
 export function LayerDropdown({ value, onChange, available }: Props) {
   const [open, setOpen] = useState(false);
@@ -36,14 +35,20 @@ export function LayerDropdown({ value, onChange, available }: Props) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 px-2 py-1 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised text-[11px]"
+        className={cn(
+          "px-3 py-1.5 rounded-md border border-surface-border bg-surface-raised/90 backdrop-blur",
+          "text-[12px] text-text flex items-center gap-2 hover:bg-surface-hover hover:border-surface-border-strong",
+          open && "border-accent/60 bg-accent/10",
+        )}
+        title="Change output layer"
       >
-        <span className="text-[10px] uppercase tracking-wider text-text-faint">Output</span>
-        <span className="font-medium text-text">{current?.label ?? value}</span>
-        <ChevronDown size={12} />
+        <span className="font-medium">Output</span>
+        <span className="text-text-faint">›</span>
+        <span className="font-semibold text-accent">{current?.label ?? value}</span>
+        <ChevronDown size={13} className={cn("text-text-muted transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-30 min-w-[220px] rounded-md border border-surface-border bg-surface-raised shadow-lg py-1">
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-30 min-w-[240px] rounded-md border border-surface-border bg-surface-raised shadow-lg py-1">
           {(["semantic", "structural", "heuristic"] as const).map((group) => (
             <div key={group}>
               <div className="px-3 pt-1.5 pb-0.5 text-[9px] uppercase tracking-wider text-text-faint">

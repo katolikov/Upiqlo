@@ -42,7 +42,8 @@ export interface UpiqloSessionDocV1 {
     folder?: {
       referenceDir: string | null;
       targetDir: string | null;
-      activePairIndex: number;
+      activeReferencePath: string | null;
+      activeTargetPath: string | null;
       annotationsByPair: Record<string, import("@/state/sessions").BoundingBox[]>;
     };
   };
@@ -80,7 +81,8 @@ export function exportSession(s: Session): UpiqloSessionDocV1 {
     out.session.folder = {
       referenceDir: s.referenceDir,
       targetDir: s.targetDir,
-      activePairIndex: s.activePairIndex,
+      activeReferencePath: s.activeReferencePath,
+      activeTargetPath: s.activeTargetPath,
       annotationsByPair: s.annotationsByPair,
     };
   }
@@ -134,7 +136,8 @@ export function importSession(doc: UpiqloSessionDocV1): Session {
   const folder = s.folder ?? {
     referenceDir: null,
     targetDir: null,
-    activePairIndex: 0,
+    activeReferencePath: null,
+    activeTargetPath: null,
     annotationsByPair: {},
   };
   const sess = buildSession("folder", s.title, s.params, {
@@ -143,7 +146,8 @@ export function importSession(doc: UpiqloSessionDocV1): Session {
     annotationsByPair: folder.annotationsByPair,
   }) as FolderSession;
   sess.layer = (s.layer as FolderSession["layer"]) ?? sess.layer;
-  sess.activePairIndex = folder.activePairIndex;
+  sess.activeReferencePath = folder.activeReferencePath ?? null;
+  sess.activeTargetPath = folder.activeTargetPath ?? null;
   return sess;
 }
 

@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertCircle,
-  FileImage,
-  FolderOpen,
-  Play,
-  RefreshCw,
-  XCircle,
-} from "lucide-react";
-import { scanFolders, heatmapDataUrl } from "@/lib/api";
+import { FileImage, Play, XCircle } from "lucide-react";
+import { heatmapDataUrl, scanFolders } from "@/lib/api";
 import { streamCompare } from "@/lib/stream";
 import { resolveImageSrc } from "@/lib/assets";
-import { pickDirectory } from "@/lib/pickers";
+import {
+  buildUnified,
+  UNIFIED_LAYERS,
+  type UnifiedArtifact,
+} from "@/lib/unified-composite";
 import {
   BOX_COLORS,
   ClearAnnotationsButton,
@@ -21,55 +18,99 @@ import { LayerDropdown } from "@/components/LayerDropdown";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
 import { ProgressBar } from "@/components/ProgressBar";
 import { SessionConfigBar } from "@/components/SessionConfigBar";
+import { SessionHeader } from "@/components/SessionHeader";
+import { UnifiedToggles } from "@/components/UnifiedToggles";
 import { cn } from "@/lib/utils";
 import {
-  pairIdFor,
+  folderPairKey,
   useSessions,
   type BoundingBox,
   type FolderSession,
 } from "@/state/sessions";
-import type { FolderPair } from "@/types/folders";
+import type { FolderScanResponse } from "@/types/folders";
 
 interface Props {
   session: FolderSession;
 }
 
+const DEFAULT_TOGGLES: UnifiedArtifact[] = UNIFIED_LAYERS.map((l) => l.key);
+
+/**
+ * Folder comparison mode. Layout:
+ *
+ *   [ config bar ....................................................... ]
+ *   [ A dir input .........  action bar  ....................... B dir input ]
+ *   [ A explorer | A canvas | Output | B canvas | B explorer           ]
+ *   [ metrics dashboard ............................................... ]
+ *
+ * Each explorer is an independent list of files in its directory. The
+ * user picks a file in each explorer — the two selections drive the
+ * current comparison pair. Selecting the same folder on both sides is
+ * fully supported; A and B stay independent.
+ */
 export function FolderCompareMode({ session }: Props) {
   const setFolderDirs = useSessions((s) => s.setFolderDirs);
   const setFolderScan = useSessions((s) => s.setFolderScan);
-  const setFolderActivePair = useSessions((s) => s.setFolderActivePair);
+  const setFolderActiveRef = useSessions((s) => s.setFolderActiveRef);
+  const setFolderActiveTgt = useSessions((s) => s.setFolderActiveTgt);
   const setFolderPairStatus = useSessions((s) => s.setFolderPairStatus);
-  const renameSession = useSessions((s) => s.renameSession);
   const setLayer = useSessions((s) => s.setLayer);
   const addAnnotation = useSessions((s) => s.addAnnotation);
   const removeAnnotation = useSessions((s) => s.removeAnnotation);
   const clearAnnotations = useSessions((s) => s.clearAnnotations);
 
-  const pair: FolderPair | null = useMemo(() => {
-    if (!session.scan) return null;
-    return session.scan.pairs[session.activePairIndex] ?? null;
-  }, [session.scan, session.activePairIndex]);
-
-  const pairStatus = pair ? session.results[pairIdFor(pair)] : null;
-  const currentPairId = pair ? pairIdFor(pair) : undefined;
-  const annotations = currentPairId ? session.annotationsByPair[currentPairId] ?? [] : [];
-
   const [refSrc, setRefSrc] = useState<string | null>(null);
   const [tgtSrc, setTgtSrc] = useState<string | null>(null);
   const [drawColor, setDrawColor] = useState<string>(BOX_COLORS[0]);
+  const [unifiedToggled, setUnifiedToggled] = useState<Set<string>>(
+    () => new Set(DEFAULT_TOGGLES),
+  );
+  const [unifiedComposite, setUnifiedComposite] = useState<string | null>(null);
+  const [unifiedBuilding, setUnifiedBuilding] = useState(false);
+
+  const currentPairId = useMemo(
+    () =>
+      session.activeReferencePath && session.activeTargetPath
+        ? folderPairKey(session.activeReferencePath, session.activeTargetPath)
+        : null,
+    [session.activeReferencePath, session.activeTargetPath],
+  );
+
+  const pairStatus = currentPairId ? session.results[currentPairId] : null;
+  const annotations = currentPairId ? session.annotationsByPair[currentPairId] ?? [] : [];
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([resolveImageSrc(pair?.reference_path ?? null), resolveImageSrc(pair?.target_path ?? null)])
-      .then(([r, t]) => {
+    Promise.all([
+      resolveImageSrc(session.activeReferencePath),
+      resolveImageSrc(session.activeTargetPath),
+    ]).then(([r, t]) => {
+      if (cancelled) return;
+      setRefSrc(r);
+      setTgtSrc(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.activeReferencePath, session.activeTargetPath]);
+
+  // Auto-scan whenever both dirs are set; cancel any stream on pair change.
+  useEffect(() => {
+    if (!session.referenceDir || !session.targetDir) return;
+    let cancelled = false;
+    void scanFolders(session.referenceDir, session.targetDir, "filename")
+      .then((scan) => {
         if (cancelled) return;
-        setRefSrc(r);
-        setTgtSrc(t);
+        setFolderScan(session.id, scan);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        console.error("scan failed", e);
       });
     return () => {
       cancelled = true;
     };
-  }, [pair?.reference_path, pair?.target_path]);
+  }, [session.id, session.referenceDir, session.targetDir, setFolderScan]);
 
   const streamRef = useRef<{ cancel: () => Promise<void> } | null>(null);
   useEffect(() => {
@@ -84,47 +125,31 @@ export function FolderCompareMode({ session }: Props) {
     if (!s) return;
     streamRef.current = null;
     void s.cancel();
-  }, [session.activePairIndex]);
+  }, [currentPairId]);
 
-  const pickRef = useCallback(async () => {
-    const p = await pickDirectory("Select reference folder (A)");
-    if (p) {
-      setFolderDirs(session.id, p, session.targetDir);
-      if (session.title === "New Folder Compare") renameSession(session.id, basename(p));
-    }
-  }, [session.id, session.targetDir, session.title, setFolderDirs, renameSession]);
-
-  const pickTgt = useCallback(async () => {
-    const p = await pickDirectory("Select target folder (B)");
-    if (p) setFolderDirs(session.id, session.referenceDir, p);
-  }, [session.id, session.referenceDir, setFolderDirs]);
-
-  const runScan = useCallback(async () => {
-    if (!session.referenceDir || !session.targetDir) return;
-    try {
-      const scan = await scanFolders(session.referenceDir, session.targetDir, "filename");
-      setFolderScan(session.id, scan);
-    } catch (e) {
-      console.error("scan failed", e);
-      alert(`Folder scan failed: ${(e as Error).message}`);
-    }
-  }, [session.id, session.referenceDir, session.targetDir, setFolderScan]);
+  const onCommitADir = useCallback(
+    (p: string) => setFolderDirs(session.id, p, session.targetDir),
+    [setFolderDirs, session.id, session.targetDir],
+  );
+  const onCommitBDir = useCallback(
+    (p: string) => setFolderDirs(session.id, session.referenceDir, p),
+    [setFolderDirs, session.id, session.referenceDir],
+  );
 
   const runPair = useCallback(() => {
-    if (!pair) return;
-    const pid = pairIdFor(pair);
+    if (!session.activeReferencePath || !session.activeTargetPath || !currentPairId) return;
     const prev = streamRef.current;
     streamRef.current = null;
     if (prev) void prev.cancel();
 
-    setFolderPairStatus(session.id, pid, { kind: "running", startedAt: Date.now() });
+    setFolderPairStatus(session.id, currentPairId, { kind: "running", startedAt: Date.now() });
     const p = session.params;
     const handle = streamCompare(
       {
-        reference_path: pair.reference_path,
-        target_path: pair.target_path,
+        reference_path: session.activeReferencePath,
+        target_path: session.activeTargetPath,
         session_id: session.id,
-        pair_id: pid,
+        pair_id: currentPairId,
         params: {
           max_side: p.maxSide,
           score_mode: p.scoreMode,
@@ -136,19 +161,19 @@ export function FolderCompareMode({ session }: Props) {
         if (streamRef.current !== handle) return;
         switch (evt.type) {
           case "open":
-            setFolderPairStatus(session.id, pid, {
+            setFolderPairStatus(session.id, currentPairId, {
               kind: "running",
               startedAt: Date.now(),
               token: evt.token,
             });
             break;
           case "stage":
-            setFolderPairStatus(session.id, pid, (prev) =>
+            setFolderPairStatus(session.id, currentPairId, (prev) =>
               prev.kind === "running" ? { ...prev, stage: evt.stage } : prev,
             );
             break;
           case "result":
-            setFolderPairStatus(session.id, pid, {
+            setFolderPairStatus(session.id, currentPairId, {
               kind: "ok",
               report: evt.report,
               finishedAt: Date.now(),
@@ -158,11 +183,11 @@ export function FolderCompareMode({ session }: Props) {
             streamRef.current = null;
             break;
           case "cancelled":
-            setFolderPairStatus(session.id, pid, { kind: "cancelled" });
+            setFolderPairStatus(session.id, currentPairId, { kind: "cancelled" });
             streamRef.current = null;
             break;
           case "error":
-            setFolderPairStatus(session.id, pid, {
+            setFolderPairStatus(session.id, currentPairId, {
               kind: "error",
               message: evt.message,
             });
@@ -172,26 +197,74 @@ export function FolderCompareMode({ session }: Props) {
       },
     );
     streamRef.current = handle;
-  }, [pair, session.id, session.params, setFolderPairStatus]);
+  }, [currentPairId, session.activeReferencePath, session.activeTargetPath, session.id, session.params, setFolderPairStatus]);
 
   const cancelPair = useCallback(() => {
-    if (!pair) return;
-    const pid = pairIdFor(pair);
+    if (!currentPairId) return;
     const s = streamRef.current;
     streamRef.current = null;
     if (s) void s.cancel();
-    setFolderPairStatus(session.id, pid, { kind: "cancelled" });
-  }, [pair, session.id, setFolderPairStatus]);
+    setFolderPairStatus(session.id, currentPairId, { kind: "cancelled" });
+  }, [currentPairId, session.id, setFolderPairStatus]);
 
   const running = pairStatus?.kind === "running";
-  const hasPair = !!pair;
+  const canRun = !!(session.activeReferencePath && session.activeTargetPath) && !running;
   const report = pairStatus?.kind === "ok" ? pairStatus.report : null;
-  const heatmapB64 = report?.heatmaps[session.layer] ?? null;
-  const middleSrc = heatmapB64 ? heatmapDataUrl(heatmapB64) : null;
-  const available = new Set(Object.keys(report?.heatmaps ?? {}));
+  const available = useMemo(
+    () => new Set(Object.keys(report?.heatmaps ?? {})),
+    [report],
+  );
 
-  const middlePlaceholder = !pair
-    ? "Scan two folders to get started"
+  const toggledKey = useMemo(
+    () => [...unifiedToggled].sort().join("|"),
+    [unifiedToggled],
+  );
+  useEffect(() => {
+    if (session.layer !== "diagnostic_overlay.png" || !report || !tgtSrc) {
+      setUnifiedComposite(null);
+      return;
+    }
+    let cancelled = false;
+    setUnifiedBuilding(true);
+    buildUnified({
+      targetSrc: tgtSrc,
+      heatmaps: report.heatmaps,
+      enabled: unifiedToggled,
+    })
+      .then((url) => {
+        if (!cancelled) setUnifiedComposite(url);
+      })
+      .finally(() => {
+        if (!cancelled) setUnifiedBuilding(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.layer, report, tgtSrc, toggledKey]);
+
+  useEffect(() => {
+    if (!report) return;
+    setUnifiedToggled((prev) => {
+      const keep = new Set<string>();
+      for (const k of prev) if (available.has(k)) keep.add(k);
+      if (keep.size === 0) {
+        for (const spec of UNIFIED_LAYERS) if (available.has(spec.key)) keep.add(spec.key);
+      }
+      return keep;
+    });
+  }, [available, report]);
+
+  let middleSrc: string | null = null;
+  if (session.layer === "diagnostic_overlay.png") {
+    middleSrc = unifiedComposite;
+  } else {
+    const b64 = report?.heatmaps[session.layer] ?? null;
+    middleSrc = b64 ? heatmapDataUrl(b64) : null;
+  }
+
+  const middlePlaceholder = !session.activeReferencePath || !session.activeTargetPath
+    ? "Pick a file on each side"
     : pairStatus?.kind === "running"
       ? pairStatus.stage
         ? `Stage ${pairStatus.stage.index}/${pairStatus.stage.total} · ${pairStatus.stage.name}`
@@ -200,7 +273,9 @@ export function FolderCompareMode({ session }: Props) {
         ? `Error: ${pairStatus.message}`
         : pairStatus?.kind === "cancelled"
           ? "Comparison cancelled. Click Compare pair to retry."
-          : "Click Compare pair to run";
+          : session.layer === "diagnostic_overlay.png" && report && unifiedBuilding
+            ? "Compositing unified view…"
+            : "Click Compare pair to run";
 
   const onAddBox = useCallback(
     (box: BoundingBox) => {
@@ -225,96 +300,108 @@ export function FolderCompareMode({ session }: Props) {
     URL.revokeObjectURL(url);
   }, []);
 
+  const toggleLayer = useCallback((key: UnifiedArtifact) => {
+    setUnifiedToggled((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Independent file lists, derived from scan.pairs + unmatched.
+  const { referenceFiles, targetFiles } = useMemo(
+    () => explodeFileLists(session.scan),
+    [session.scan],
+  );
+
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
       <SessionConfigBar sessionId={session.id} params={session.params} />
 
-      <div className="h-10 border-b border-surface-border bg-surface flex items-center px-3 gap-3 shrink-0 text-[12px]">
-        <DirPicker label="A dir" value={session.referenceDir} onPick={pickRef} />
-        <DirPicker label="B dir" value={session.targetDir} onPick={pickTgt} />
-        <button
-          type="button"
-          onClick={runScan}
-          disabled={!session.referenceDir || !session.targetDir}
-          className="flex items-center gap-1 px-2 py-1 rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-        >
-          <RefreshCw size={12} /> Scan
-        </button>
-
-        <div className="h-5 w-px bg-surface-border" />
-
-        <div className="text-[11px] text-text-muted tabular-nums shrink-0">
-          {session.scan
-            ? `${session.scan.pairs.length} pair${session.scan.pairs.length === 1 ? "" : "s"}`
-            : "—"}
-          {pair ? ` · ${session.activePairIndex + 1} / ${session.scan?.pairs.length ?? 0}` : ""}
-        </div>
-
-        {running && pairStatus?.kind === "running" ? (
-          <ProgressBar status={pairStatus} />
-        ) : (
-          <div className="flex-1" />
-        )}
-
-        <ColorPalette value={drawColor} onChange={setDrawColor} />
-        <ClearAnnotationsButton
-          count={annotations.length}
-          onClick={() => currentPairId && clearAnnotations(session.id, currentPairId)}
-        />
-
-        {running ? (
-          <button
-            type="button"
-            onClick={cancelPair}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20"
-          >
-            <XCircle size={13} /> Cancel
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={!hasPair}
-            onClick={runPair}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed"
-          >
-            <Play size={13} /> Compare pair
-          </button>
-        )}
-      </div>
+      <SessionHeader
+        kind="directory"
+        leftLabel="A · Folder"
+        rightLabel="B · Folder"
+        leftValue={session.referenceDir}
+        onCommitLeft={onCommitADir}
+        rightValue={session.targetDir}
+        onCommitRight={onCommitBDir}
+        middle={
+          <div className="flex items-center gap-3 px-2 w-full justify-center">
+            {session.scan && (
+              <div className="text-[11px] text-text-muted tabular-nums shrink-0">
+                {referenceFiles.length} A · {targetFiles.length} B
+              </div>
+            )}
+            {running && pairStatus?.kind === "running" ? (
+              <ProgressBar status={pairStatus} />
+            ) : null}
+            <ColorPalette value={drawColor} onChange={setDrawColor} />
+            <ClearAnnotationsButton
+              count={annotations.length}
+              onClick={() => currentPairId && clearAnnotations(session.id, currentPairId)}
+            />
+            {running ? (
+              <button
+                type="button"
+                onClick={cancelPair}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20"
+              >
+                <XCircle size={13} /> Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={!canRun}
+                onClick={runPair}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed"
+              >
+                <Play size={13} /> Compare pair
+              </button>
+            )}
+          </div>
+        }
+      />
 
       <div className="flex-1 flex min-h-0 min-w-0">
-        {/* Left-most: file explorer for folder A */}
-        <FileExplorer
-          side="A"
-          scan={session.scan}
-          activeIndex={session.activePairIndex}
-          onPick={(i) => setFolderActivePair(session.id, i)}
-          getPath={(p) => p.reference_path}
+        <FileList
+          label="Folder A"
+          files={referenceFiles}
+          active={session.activeReferencePath}
+          onPick={(p) => setFolderActiveRef(session.id, p)}
           className="border-r border-surface-border"
         />
 
-        {/* Reference pane */}
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border">
           <ImageCanvas
             sessionId={session.id}
             src={refSrc}
             label="A · Reference"
-            placeholder={pair ? "Loading…" : "Scan folders + pick a pair"}
+            placeholder="Pick a file in Folder A on the left"
             boxes={annotations}
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
-            saveFilenameBase={`${basename(pair?.reference_path) || "reference"}-annotated`}
+            saveFilenameBase={`${basename(session.activeReferencePath) || "reference"}-annotated`}
           />
         </div>
 
-        {/* Output pane */}
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border relative">
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 max-w-[92%]">
             <LayerDropdown
               value={session.layer}
               onChange={(l) => setLayer(session.id, l)}
               available={available}
             />
+            {session.layer === "diagnostic_overlay.png" && report && (
+              <div className="px-2 py-1.5 rounded-md bg-surface-raised/90 backdrop-blur border border-surface-border">
+                <UnifiedToggles
+                  enabled={unifiedToggled}
+                  onToggle={toggleLayer}
+                  available={available}
+                />
+              </div>
+            )}
           </div>
           <ImageCanvas
             sessionId={session.id}
@@ -331,27 +418,24 @@ export function FolderCompareMode({ session }: Props) {
           />
         </div>
 
-        {/* Target pane */}
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border">
           <ImageCanvas
             sessionId={session.id}
             src={tgtSrc}
             label="B · Target"
-            placeholder={pair ? "Loading…" : "Scan folders + pick a pair"}
+            placeholder="Pick a file in Folder B on the right"
             boxes={annotations}
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
-            saveFilenameBase={`${basename(pair?.target_path) || "target"}-annotated`}
+            saveFilenameBase={`${basename(session.activeTargetPath) || "target"}-annotated`}
           />
         </div>
 
-        {/* Right-most: file explorer for folder B */}
-        <FileExplorer
-          side="B"
-          scan={session.scan}
-          activeIndex={session.activePairIndex}
-          onPick={(i) => setFolderActivePair(session.id, i)}
-          getPath={(p) => p.target_path}
+        <FileList
+          label="Folder B"
+          files={targetFiles}
+          active={session.activeTargetPath}
+          onPick={(p) => setFolderActiveTgt(session.id, p)}
         />
       </div>
 
@@ -360,30 +444,21 @@ export function FolderCompareMode({ session }: Props) {
   );
 }
 
-// -------------------------- File explorer column --------------------------
+// -------------------------- File list column --------------------------
 
-function FileExplorer({
-  side,
-  scan,
-  activeIndex,
+function FileList({
+  label,
+  files,
+  active,
   onPick,
-  getPath,
   className,
 }: {
-  side: "A" | "B";
-  scan: FolderSession["scan"];
-  activeIndex: number;
-  onPick: (index: number) => void;
-  getPath: (p: FolderPair) => string;
+  label: string;
+  files: string[];
+  active: string | null;
+  onPick: (path: string) => void;
   className?: string;
 }) {
-  const label = side === "A" ? "Folder A" : "Folder B";
-  const unmatched = scan
-    ? side === "A"
-      ? scan.unmatched_reference
-      : scan.unmatched_target
-    : [];
-
   return (
     <aside
       className={cn(
@@ -392,87 +467,65 @@ function FileExplorer({
       )}
     >
       <div className="h-8 shrink-0 px-3 flex items-center text-[11px] uppercase tracking-wider text-text-faint border-b border-surface-border">
-        <FolderOpen size={11} className="mr-1.5" />
         {label}
       </div>
 
-      {!scan ? (
+      {files.length === 0 ? (
         <div className="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-text-faint">
-          (no scan yet)
-        </div>
-      ) : scan.pairs.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-text-faint">
-          (no pairs)
+          (no files)
         </div>
       ) : (
         <ul className="flex-1 overflow-y-auto min-h-0">
-          {scan.pairs.map((p, i) => {
-            const active = i === activeIndex;
-            const name = basename(getPath(p));
+          {files.map((p) => {
+            const activeRow = active === p;
             return (
-              <li key={p.label + i}>
+              <li key={p}>
                 <button
                   type="button"
-                  onClick={() => onPick(i)}
+                  onClick={() => onPick(p)}
                   className={cn(
                     "w-full text-left px-3 py-1.5 flex items-center gap-2 text-[11px] border-l-2 transition-colors",
-                    active
+                    activeRow
                       ? "bg-accent/15 text-accent border-accent"
                       : "text-text-muted border-transparent hover:bg-surface-hover/50 hover:text-text",
                   )}
-                  title={getPath(p)}
+                  title={p}
                 >
                   <FileImage size={11} className="shrink-0 text-text-faint" />
-                  <span className="truncate">{name}</span>
+                  <span className="truncate">{basename(p)}</span>
                 </button>
               </li>
             );
           })}
-          {unmatched.length > 0 && (
-            <>
-              <li className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-faint flex items-center gap-1 border-t border-surface-border mt-1">
-                <AlertCircle size={11} /> Unmatched ({unmatched.length})
-              </li>
-              {unmatched.map((p) => (
-                <li key={p}>
-                  <div
-                    className="w-full text-left px-3 py-1 flex items-center gap-2 text-[11px] text-text-faint"
-                    title={p}
-                  >
-                    <FileImage size={11} className="shrink-0 opacity-50" />
-                    <span className="truncate italic">{basename(p)}</span>
-                  </div>
-                </li>
-              ))}
-            </>
-          )}
         </ul>
       )}
     </aside>
   );
 }
 
-function DirPicker({
-  label,
-  value,
-  onPick,
-}: {
-  label: string;
-  value: string | null;
-  onPick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-surface-border text-text-muted hover:text-text hover:bg-surface-raised max-w-[240px] shrink-0"
-      title={value ?? "Click to pick a folder"}
-    >
-      <FolderOpen size={12} />
-      <span className="font-medium">{label}</span>
-      <span className="truncate text-[11px]">{value ? basename(value) : "Pick folder…"}</span>
-    </button>
-  );
+/** Explode a scan response into two independent file lists (A and B). */
+function explodeFileLists(scan: FolderScanResponse | null): {
+  referenceFiles: string[];
+  targetFiles: string[];
+} {
+  if (!scan) return { referenceFiles: [], targetFiles: [] };
+  const ref = [
+    ...scan.pairs.map((p) => p.reference_path),
+    ...scan.unmatched_reference,
+  ];
+  const tgt = [
+    ...scan.pairs.map((p) => p.target_path),
+    ...scan.unmatched_target,
+  ];
+  // Sort by basename, keep absolute paths unique.
+  return {
+    referenceFiles: Array.from(new Set(ref)).sort(cmpByBasename),
+    targetFiles: Array.from(new Set(tgt)).sort(cmpByBasename),
+  };
+}
+
+function cmpByBasename(a: string, b: string): number {
+  return basename(a).toLowerCase().localeCompare(basename(b).toLowerCase());
 }
 
 function basename(path: string | null | undefined): string {

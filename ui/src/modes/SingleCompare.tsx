@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { FileImage, Play, XCircle } from "lucide-react";
-import { pickImageFile } from "@/lib/pickers";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Play, XCircle } from "lucide-react";
 import { streamCompare } from "@/lib/stream";
 import { heatmapDataUrl } from "@/lib/api";
 import { resolveImageSrc } from "@/lib/assets";
 import { onTauriFileDrop } from "@/lib/tauri-drag";
+import {
+  buildUnified,
+  UNIFIED_LAYERS,
+  type UnifiedArtifact,
+} from "@/lib/unified-composite";
 import {
   BOX_COLORS,
   ClearAnnotationsButton,
@@ -15,6 +19,8 @@ import { LayerDropdown } from "@/components/LayerDropdown";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
 import { ProgressBar } from "@/components/ProgressBar";
 import { SessionConfigBar } from "@/components/SessionConfigBar";
+import { SessionHeader } from "@/components/SessionHeader";
+import { UnifiedToggles } from "@/components/UnifiedToggles";
 import {
   useSessions,
   type BoundingBox,
@@ -25,10 +31,16 @@ interface Props {
   session: SingleSession;
 }
 
+const DEFAULT_TOGGLES: UnifiedArtifact[] = UNIFIED_LAYERS.map((l) => l.key);
+
 /**
- * Single-image comparison mode: 3-pane workspace (A / Output / B), with
- * per-session config at the top, bounding-box annotation tools, and
- * streamed comparison with true cancellation.
+ * Single-image comparison mode. Layout:
+ *
+ *   [ config bar ............................................ ]
+ *   [ A path input ............  middle  ........ B path input ]
+ *   [ action bar: color | clear | Compare / Cancel .............. ]
+ *   [ A canvas   |   Output canvas   |   B canvas               ]
+ *   [ metrics dashboard ...................................... ]
  */
 export function SingleCompareMode({ session }: Props) {
   const setSinglePaths = useSessions((s) => s.setSinglePaths);
@@ -42,7 +54,13 @@ export function SingleCompareMode({ session }: Props) {
   const [refSrc, setRefSrc] = useState<string | null>(null);
   const [tgtSrc, setTgtSrc] = useState<string | null>(null);
   const [drawColor, setDrawColor] = useState<string>(BOX_COLORS[0]);
+  const [unifiedToggled, setUnifiedToggled] = useState<Set<string>>(
+    () => new Set(DEFAULT_TOGGLES),
+  );
+  const [unifiedComposite, setUnifiedComposite] = useState<string | null>(null);
+  const [unifiedBuilding, setUnifiedBuilding] = useState(false);
 
+  // Stream handle so the Cancel button and unmount cleanup can tear down.
   const streamRef = useRef<{ cancel: () => Promise<void> } | null>(null);
   useEffect(() => {
     return () => {
@@ -52,8 +70,7 @@ export function SingleCompareMode({ session }: Props) {
     };
   }, []);
 
-  // Resolve absolute paths to <img>-compatible URLs (asset:// in Tauri,
-  // /api/file fallback in browser dev).
+  // Resolve A/B abs paths to webview-friendly URLs.
   useEffect(() => {
     let cancelled = false;
     Promise.all([resolveImageSrc(session.referencePath), resolveImageSrc(session.targetPath)])
@@ -67,8 +84,7 @@ export function SingleCompareMode({ session }: Props) {
     };
   }, [session.referencePath, session.targetPath]);
 
-  // OS drag-drop: Tauri forwards dropped paths here. We fill whichever
-  // pane is empty (ref first, then tgt).
+  // OS drag-drop via Tauri → load into A first, then B.
   useEffect(() => {
     const off = onTauriFileDrop((paths) => {
       if (paths.length === 0) return;
@@ -82,25 +98,18 @@ export function SingleCompareMode({ session }: Props) {
       } else {
         setSinglePaths(session.id, p0, p1 ?? current.targetPath);
       }
-      if (session.title === "New Comparison") {
-        renameSession(session.id, filename(p0));
-      }
     });
     return off;
-  }, [session.id, session.title, setSinglePaths, renameSession]);
+  }, [session.id, setSinglePaths]);
 
-  const onPickRef = useCallback(async () => {
-    const p = await pickImageFile("Select reference image (A)");
-    if (p) {
-      setSinglePaths(session.id, p, session.targetPath);
-      if (session.title === "New Comparison") renameSession(session.id, filename(p));
-    }
-  }, [session.id, session.targetPath, session.title, setSinglePaths, renameSession]);
-
-  const onPickTgt = useCallback(async () => {
-    const p = await pickImageFile("Select target image (B)");
-    if (p) setSinglePaths(session.id, session.referencePath, p);
-  }, [session.id, session.referencePath, setSinglePaths]);
+  const onCommitA = useCallback(
+    (p: string) => setSinglePaths(session.id, p, session.targetPath),
+    [setSinglePaths, session.id, session.targetPath],
+  );
+  const onCommitB = useCallback(
+    (p: string) => setSinglePaths(session.id, session.referencePath, p),
+    [setSinglePaths, session.id, session.referencePath],
+  );
 
   const run = useCallback(() => {
     if (!session.referencePath || !session.targetPath) return;
@@ -170,10 +179,66 @@ export function SingleCompareMode({ session }: Props) {
   const running = session.status.kind === "running";
   const canRun = !!session.referencePath && !!session.targetPath && !running;
   const report = session.status.kind === "ok" ? session.status.report : null;
+  const available = useMemo(
+    () => new Set(Object.keys(report?.heatmaps ?? {})),
+    [report],
+  );
 
-  const heatmapB64 = report?.heatmaps[session.layer] ?? null;
-  const middleSrc = heatmapB64 ? heatmapDataUrl(heatmapB64) : null;
-  const available = new Set(Object.keys(report?.heatmaps ?? {}));
+  // --- Unified canvas composite: rebuild when toggles or heatmaps change ---
+  const toggledKey = useMemo(
+    () => [...unifiedToggled].sort().join("|"),
+    [unifiedToggled],
+  );
+  useEffect(() => {
+    if (session.layer !== "diagnostic_overlay.png" || !report || !tgtSrc) {
+      setUnifiedComposite(null);
+      return;
+    }
+    let cancelled = false;
+    setUnifiedBuilding(true);
+    buildUnified({
+      targetSrc: tgtSrc,
+      heatmaps: report.heatmaps,
+      enabled: unifiedToggled,
+    })
+      .then((url) => {
+        if (!cancelled) setUnifiedComposite(url);
+      })
+      .finally(() => {
+        if (!cancelled) setUnifiedBuilding(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.layer, report, tgtSrc, toggledKey]);
+
+  // Reset toggles when the session's available layers change — keep only
+  // ones present in the new report.
+  useEffect(() => {
+    if (!report) return;
+    setUnifiedToggled((prev) => {
+      const keep = new Set<string>();
+      for (const k of prev) if (available.has(k)) keep.add(k);
+      for (const spec of UNIFIED_LAYERS) {
+        if (available.has(spec.key) && keep.size === 0) keep.add(spec.key);
+      }
+      // If nothing kept (first render after a run), default to everything.
+      if (keep.size === 0) {
+        for (const spec of UNIFIED_LAYERS) if (available.has(spec.key)) keep.add(spec.key);
+      }
+      return keep;
+    });
+  }, [available, report]);
+
+  // Resolve the middle-pane image source.
+  let middleSrc: string | null = null;
+  if (session.layer === "diagnostic_overlay.png") {
+    middleSrc = unifiedComposite;
+  } else {
+    const b64 = report?.heatmaps[session.layer] ?? null;
+    middleSrc = b64 ? heatmapDataUrl(b64) : null;
+  }
 
   const middlePlaceholder =
     session.status.kind === "running"
@@ -184,7 +249,9 @@ export function SingleCompareMode({ session }: Props) {
         ? `Error: ${session.status.message}`
         : session.status.kind === "cancelled"
           ? "Comparison cancelled. Click Compare to retry."
-          : "Run a comparison to see heatmaps";
+          : session.layer === "diagnostic_overlay.png" && report && unifiedBuilding
+            ? "Compositing unified view…"
+            : "Run a comparison to see heatmaps";
 
   const onAddBox = useCallback(
     (box: BoundingBox) => addAnnotation(session.id, box),
@@ -205,59 +272,66 @@ export function SingleCompareMode({ session }: Props) {
     URL.revokeObjectURL(url);
   }, []);
 
-  const onDropRef = useCallback(
-    (path: string) => {
-      setSinglePaths(session.id, path, session.targetPath);
-      if (session.title === "New Comparison") renameSession(session.id, filename(path));
-    },
-    [renameSession, session.id, session.targetPath, session.title, setSinglePaths],
-  );
-  const onDropTgt = useCallback(
-    (path: string) => setSinglePaths(session.id, session.referencePath, path),
-    [setSinglePaths, session.id, session.referencePath],
-  );
+  const toggleLayer = useCallback((key: UnifiedArtifact) => {
+    setUnifiedToggled((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Update the session title on first path commit if the user hasn't
+  // renamed the auto-generated title yet.
+  useEffect(() => {
+    // no-op: session title is auto-generated and purposely stable.
+    void renameSession;
+  }, [renameSession]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
       <SessionConfigBar sessionId={session.id} params={session.params} />
 
-      <div className="h-10 border-b border-surface-border bg-surface flex items-center px-3 gap-3 shrink-0 text-[12px]">
-        <PathPicker label="A" value={session.referencePath} onPick={onPickRef} />
-        <PathPicker label="B" value={session.targetPath} onPick={onPickTgt} />
-
-        {session.status.kind === "running" ? (
-          <ProgressBar status={session.status} />
-        ) : (
-          <div className="flex-1" />
-        )}
-
-        <ColorPalette value={drawColor} onChange={setDrawColor} />
-        <ClearAnnotationsButton
-          count={session.annotations.length}
-          onClick={() => clearAnnotations(session.id)}
-        />
-
-        {running ? (
-          <button
-            type="button"
-            onClick={cancel}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20"
-          >
-            <XCircle size={13} />
-            Cancel
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={!canRun}
-            onClick={run}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed"
-          >
-            <Play size={13} />
-            Compare
-          </button>
-        )}
-      </div>
+      {/* A input on far left, B input on far right, action bar in the middle. */}
+      <SessionHeader
+        kind="file"
+        leftLabel="A · Reference"
+        rightLabel="B · Target"
+        leftValue={session.referencePath}
+        onCommitLeft={onCommitA}
+        rightValue={session.targetPath}
+        onCommitRight={onCommitB}
+        middle={
+          <div className="flex items-center gap-3 px-2 w-full justify-center">
+            {session.status.kind === "running" ? (
+              <ProgressBar status={session.status} />
+            ) : null}
+            <ColorPalette value={drawColor} onChange={setDrawColor} />
+            <ClearAnnotationsButton
+              count={session.annotations.length}
+              onClick={() => clearAnnotations(session.id)}
+            />
+            {running ? (
+              <button
+                type="button"
+                onClick={cancel}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20"
+              >
+                <XCircle size={13} /> Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={!canRun}
+                onClick={run}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed"
+              >
+                <Play size={13} /> Compare
+              </button>
+            )}
+          </div>
+        }
+      />
 
       <div className="flex-1 flex min-h-0 min-w-0 relative">
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border">
@@ -265,22 +339,31 @@ export function SingleCompareMode({ session }: Props) {
             sessionId={session.id}
             src={refSrc}
             label="A · Reference"
-            placeholder="Pick a reference image · or drag & drop"
+            placeholder="Paste an A path above, drag an image here, or click the folder icon"
             boxes={session.annotations}
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
-            saveFilenameBase={`${filename(session.referencePath) || "reference"}-annotated`}
-            onDropPath={onDropRef}
+            saveFilenameBase={`${basename(session.referencePath) || "reference"}-annotated`}
+            onDropPath={onCommitA}
           />
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border relative">
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 max-w-[92%]">
             <LayerDropdown
               value={session.layer}
               onChange={(l) => setLayer(session.id, l)}
               available={available}
             />
+            {session.layer === "diagnostic_overlay.png" && report && (
+              <div className="px-2 py-1.5 rounded-md bg-surface-raised/90 backdrop-blur border border-surface-border">
+                <UnifiedToggles
+                  enabled={unifiedToggled}
+                  onToggle={toggleLayer}
+                  available={available}
+                />
+              </div>
+            )}
           </div>
           <ImageCanvas
             sessionId={session.id}
@@ -302,12 +385,12 @@ export function SingleCompareMode({ session }: Props) {
             sessionId={session.id}
             src={tgtSrc}
             label="B · Target"
-            placeholder="Pick a target image · or drag & drop"
+            placeholder="Paste a B path above, drag an image here, or click the folder icon"
             boxes={session.annotations}
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
-            saveFilenameBase={`${filename(session.targetPath) || "target"}-annotated`}
-            onDropPath={onDropTgt}
+            saveFilenameBase={`${basename(session.targetPath) || "target"}-annotated`}
+            onDropPath={onCommitB}
           />
         </div>
       </div>
@@ -317,30 +400,7 @@ export function SingleCompareMode({ session }: Props) {
   );
 }
 
-function PathPicker({
-  label,
-  value,
-  onPick,
-}: {
-  label: string;
-  value: string | null;
-  onPick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-surface-border text-text-muted hover:text-text hover:bg-surface-raised max-w-[280px] shrink-0"
-      title={value ?? "Click to pick an image, or drag one into the pane"}
-    >
-      <FileImage size={12} />
-      <span className="font-medium">{label}</span>
-      <span className="truncate text-[11px]">{value ? filename(value) : "Pick image…"}</span>
-    </button>
-  );
-}
-
-function filename(path: string | null): string {
+function basename(path: string | null): string {
   if (!path) return "";
   return path.split(/[\\/]/).pop() ?? path;
 }
