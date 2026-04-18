@@ -155,6 +155,9 @@ export function FolderCompareMode({ session }: Props) {
           score_mode: p.scoreMode,
           pyramid: p.pyramid,
           feature_side: p.featureSide,
+          width: p.rawWidth ?? null,
+          height: p.rawHeight ?? null,
+          pixel_format: p.rawPixelFormat ?? null,
         },
       },
       (evt) => {
@@ -317,7 +320,11 @@ export function FolderCompareMode({ session }: Props) {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
-      <SessionConfigBar sessionId={session.id} params={session.params} />
+      <SessionConfigBar
+        sessionId={session.id}
+        params={session.params}
+        activePaths={[session.activeReferencePath, session.activeTargetPath]}
+      />
 
       <SessionHeader
         kind="directory"

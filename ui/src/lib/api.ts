@@ -1,6 +1,7 @@
 import { authHeaders, engineBaseUrl, getEnginePort } from "./engine";
 import type { CompareReport } from "@/types/report";
 import type { FolderScanResponse, PairingMode } from "@/types/folders";
+import type { PixelFormat } from "./image-formats";
 
 export interface HealthResponse {
   status: "ok";
@@ -13,6 +14,10 @@ export interface CompareParamsPayload {
   score_mode?: "sigmoid" | "nll";
   pyramid?: boolean;
   feature_side?: number;
+  /** RAW-only input shape. Omit (or leave null) for PNG/JPG/TIFF/etc. */
+  width?: number | null;
+  height?: number | null;
+  pixel_format?: PixelFormat | null;
 }
 
 async function engineFetch(path: string, init?: RequestInit): Promise<Response> {

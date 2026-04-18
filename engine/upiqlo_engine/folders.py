@@ -24,6 +24,8 @@ PairingMode = Literal["filename", "index"]
 
 IMAGE_EXTS = frozenset(
     {
+        # Auto-detected (PIL reads natively): dimensions + format come
+        # from the file itself.
         ".png",
         ".jpg",
         ".jpeg",
@@ -31,9 +33,13 @@ IMAGE_EXTS = frozenset(
         ".tif",
         ".tiff",
         ".webp",
+        # Serialised numpy ndarray — dimensions come from the array.
         ".npy",
+        # Raw byte streams — require width/height/pixel_format params.
+        # .nv21 / .nv12 also imply pixel_format from extension.
         ".raw",
         ".bin",
+        ".yuv",
         ".nv21",
         ".nv12",
     }

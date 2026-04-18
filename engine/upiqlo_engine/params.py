@@ -12,7 +12,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 ScoreMode = Literal["sigmoid", "nll"]
-PixelFormat = Literal["RGB888", "RGBA", "NV21", "NV12", "BGR888"]
+# Upstream (upiqal_cli.py) accepts exactly these raw pixel formats:
+PixelFormat = Literal["NV21", "NV12", "GRAY8", "RGB888"]
 
 
 class CompareParams(BaseModel):
@@ -22,7 +23,9 @@ class CompareParams(BaseModel):
     score_mode: ScoreMode = "sigmoid"
     pyramid: bool = True
     feature_side: int = Field(256, ge=128, le=512)
-    # Reserved for RAW inputs (Phase 2+).
+    # RAW inputs (.raw/.bin/.yuv) require width + height + pixel_format.
+    # For PNG/JPG/TIFF/BMP/WebP/NPY these are auto-detected and must be
+    # omitted. .nv21/.nv12 derive pixel_format from their extension.
     width: Optional[int] = None
     height: Optional[int] = None
     pixel_format: Optional[PixelFormat] = None
