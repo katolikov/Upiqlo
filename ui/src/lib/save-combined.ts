@@ -12,7 +12,11 @@ import { isTauri } from "@/lib/assets";
 import type { CompareReport } from "@/types/report";
 import type { BoundingBox } from "@/state/sessions";
 
-const FOOTER_H = 140;
+/** Footer height scales with the combined canvas width so the text in
+ * the metrics strip stays readable when the panes are large. */
+function footerFor(totalWidth: number): number {
+  return Math.max(140, Math.round(totalWidth * 0.04));
+}
 
 /** Draw annotation rectangles (halo + coloured stroke + label chip) in
  * the sub-rectangle `(ox, oy, w, h)` of the combined canvas. Matches
@@ -222,9 +226,10 @@ export async function saveCombinedImage({
   const mW = Math.round(M.naturalWidth * scale(M));
   const rW = Math.round(R.naturalWidth * scale(R));
 
-  const LABEL_H = labels ? 40 : 0;
   const totalW = lW + mW + rW;
-  const totalH = LABEL_H + H + (report ? FOOTER_H : 0);
+  const LABEL_H = labels ? Math.max(40, Math.round(totalW * 0.015)) : 0;
+  const footerH = report ? footerFor(totalW) : 0;
+  const totalH = LABEL_H + H + footerH;
 
   const canvas = document.createElement("canvas");
   canvas.width = totalW;
@@ -265,7 +270,7 @@ export async function saveCombinedImage({
   ctx.fillRect(lW, LABEL_H, 1, H);
   ctx.fillRect(lW + mW, LABEL_H, 1, H);
 
-  if (report) drawFooter(ctx, totalW, LABEL_H + H, FOOTER_H, report);
+  if (report) drawFooter(ctx, totalW, LABEL_H + H, footerH, report);
 
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/png"),

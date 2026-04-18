@@ -35,6 +35,14 @@ interface Props {
 const DEFAULT_TOGGLES: UnifiedArtifact[] = UNIFIED_LAYERS.map((l) => l.key);
 
 /**
+ * Map of session-id → currently-running stream handle, kept outside
+ * React so the stream keeps running when the component unmounts (tab
+ * switch, Start-screen navigation) and the zustand session store
+ * continues to receive stage / result events in the background.
+ */
+const activeStreams = new Map<string, { cancel: () => Promise<void> }>();
+
+/**
  * Single-image comparison mode. Layout:
  *
  *   [ config bar .................... | Run / Cancel ]
@@ -60,14 +68,15 @@ export function SingleCompareMode({ session }: Props) {
   const [unifiedComposite, setUnifiedComposite] = useState<string | null>(null);
   const [unifiedBuilding, setUnifiedBuilding] = useState(false);
 
-  const streamRef = useRef<{ cancel: () => Promise<void> } | null>(null);
-  useEffect(() => {
-    return () => {
-      const s = streamRef.current;
-      streamRef.current = null;
-      if (s) void s.cancel();
-    };
-  }, []);
+  // Streams live outside React so they survive tab switches and
+  // Start-screen navigation — the server-sent event loop keeps
+  // pushing updates into the Zustand store, so when the user comes
+  // back to the tab they see the live progress and final result.
+  // We only cancel on explicit user action (Cancel button) or when
+  // the session is closed, NOT on component unmount.
+  const streamRef = useRef<{ cancel: () => Promise<void> } | null>(
+    activeStreams.get(session.id) ?? null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -110,11 +119,13 @@ export function SingleCompareMode({ session }: Props) {
 
   const run = useCallback(() => {
     if (!session.referencePath || !session.targetPath) return;
-    const prev = streamRef.current;
-    streamRef.current = null;
+    const sid = session.id;
+    // Replace any in-flight run for this session.
+    const prev = activeStreams.get(sid);
     if (prev) void prev.cancel();
+    activeStreams.delete(sid);
 
-    setSingleStatus(session.id, { kind: "running", startedAt: Date.now() });
+    setSingleStatus(sid, { kind: "running", startedAt: Date.now() });
     const p = session.params;
     const handle = streamCompare(
       {
@@ -131,50 +142,56 @@ export function SingleCompareMode({ session }: Props) {
         },
       },
       (evt) => {
-        if (streamRef.current !== handle) return;
+        // Stale events (a subsequent run superseded this one) are
+        // dropped by checking that the active stream for this
+        // session is still the handle we were created with.
+        if (activeStreams.get(sid) !== handle) return;
         switch (evt.type) {
           case "open":
-            setSingleStatus(session.id, {
+            setSingleStatus(sid, {
               kind: "running",
               startedAt: Date.now(),
               token: evt.token,
             });
             break;
           case "stage":
-            setSingleStatus(session.id, (prev) =>
+            setSingleStatus(sid, (prev) =>
               prev.kind === "running" ? { ...prev, stage: evt.stage } : prev,
             );
             break;
           case "result":
-            setSingleStatus(session.id, {
+            setSingleStatus(sid, {
               kind: "ok",
               report: evt.report,
               finishedAt: Date.now(),
             });
             break;
           case "done":
-            streamRef.current = null;
+            activeStreams.delete(sid);
             break;
           case "cancelled":
-            setSingleStatus(session.id, { kind: "cancelled" });
-            streamRef.current = null;
+            setSingleStatus(sid, { kind: "cancelled" });
+            activeStreams.delete(sid);
             break;
           case "error":
-            setSingleStatus(session.id, { kind: "error", message: evt.message });
+            setSingleStatus(sid, { kind: "error", message: evt.message });
             toast("error", `Run failed: ${evt.message}`);
-            streamRef.current = null;
+            activeStreams.delete(sid);
             break;
         }
       },
     );
+    activeStreams.set(sid, handle);
     streamRef.current = handle;
   }, [session.id, session.referencePath, session.targetPath, session.params, setSingleStatus]);
 
   const cancel = useCallback(() => {
-    const s = streamRef.current;
+    const sid = session.id;
+    const s = activeStreams.get(sid) ?? streamRef.current;
+    activeStreams.delete(sid);
     streamRef.current = null;
     if (s) void s.cancel();
-    setSingleStatus(session.id, { kind: "cancelled" });
+    setSingleStatus(sid, { kind: "cancelled" });
   }, [session.id, setSingleStatus]);
 
   const running = session.status.kind === "running";

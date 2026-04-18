@@ -124,6 +124,14 @@ function extractMaskRGBA(
   return { strength, rgb };
 }
 
+/** Upper bound on the composite's longest side. The Unified view is
+ * purely diagnostic — we don't need per-pixel fidelity at the input's
+ * native resolution, and running the per-pixel JS loop on a 4K image
+ * takes several seconds. Processing at 1024 px on the long side keeps
+ * the composite crisp at typical pane sizes and cuts the work by up
+ * to 16× on large inputs. The browser upsamples it when displayed. */
+const MAX_COMPOSITE_SIDE = 1024;
+
 export async function buildUnified({
   targetSrc,
   heatmaps,
@@ -131,8 +139,12 @@ export async function buildUnified({
 }: BuildUnifiedArgs): Promise<string | null> {
   try {
     const base = await loadImage(targetSrc);
-    const w = base.naturalWidth;
-    const h = base.naturalHeight;
+    const natW = base.naturalWidth;
+    const natH = base.naturalHeight;
+    const longSide = Math.max(natW, natH);
+    const scale = longSide > MAX_COMPOSITE_SIDE ? MAX_COMPOSITE_SIDE / longSide : 1;
+    const w = Math.max(1, Math.round(natW * scale));
+    const h = Math.max(1, Math.round(natH * scale));
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;

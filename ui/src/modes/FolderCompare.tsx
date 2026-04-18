@@ -38,6 +38,14 @@ interface Props {
 const DEFAULT_TOGGLES: UnifiedArtifact[] = UNIFIED_LAYERS.map((l) => l.key);
 
 /**
+ * Active stream registry keyed by `${sessionId}:${pairId}` so a
+ * folder-compare run keeps going when the user switches tabs, goes
+ * to the Start screen, or picks a different pair — the result lands
+ * on the original pair when the stream completes.
+ */
+const activeFolderStreams = new Map<string, { cancel: () => Promise<void> }>();
+
+/**
  * Folder comparison mode. Layout:
  *
  *   [ config bar ................................... | Run / Cancel ]
@@ -108,20 +116,10 @@ export function FolderCompareMode({ session }: Props) {
     };
   }, [session.id, session.referenceDir, session.targetDir, setFolderScan]);
 
+  // Stream handle lives in a module-level registry keyed by
+  // `${session.id}:${pairId}` so it keeps running past unmount (tab
+  // switch / Start-screen navigation / picking a different pair).
   const streamRef = useRef<{ cancel: () => Promise<void> } | null>(null);
-  useEffect(() => {
-    return () => {
-      const s = streamRef.current;
-      streamRef.current = null;
-      if (s) void s.cancel();
-    };
-  }, []);
-  useEffect(() => {
-    const s = streamRef.current;
-    if (!s) return;
-    streamRef.current = null;
-    void s.cancel();
-  }, [currentPairId]);
 
   const onCommitADir = useCallback(
     (p: string) => setFolderDirs(session.id, p, session.targetDir),
@@ -134,17 +132,19 @@ export function FolderCompareMode({ session }: Props) {
 
   const runPair = useCallback(() => {
     if (!session.activeReferencePath || !session.activeTargetPath || !currentPairId) return;
-    const prev = streamRef.current;
-    streamRef.current = null;
+    const sid = session.id;
+    const key = `${sid}:${currentPairId}`;
+    const prev = activeFolderStreams.get(key);
     if (prev) void prev.cancel();
+    activeFolderStreams.delete(key);
 
-    setFolderPairStatus(session.id, currentPairId, { kind: "running", startedAt: Date.now() });
+    setFolderPairStatus(sid, currentPairId, { kind: "running", startedAt: Date.now() });
     const p = session.params;
     const handle = streamCompare(
       {
         reference_path: session.activeReferencePath,
         target_path: session.activeTargetPath,
-        session_id: session.id,
+        session_id: sid,
         pair_id: currentPairId,
         params: {
           max_side: p.maxSide,
@@ -157,51 +157,54 @@ export function FolderCompareMode({ session }: Props) {
         },
       },
       (evt) => {
-        if (streamRef.current !== handle) return;
+        if (activeFolderStreams.get(key) !== handle) return;
         switch (evt.type) {
           case "open":
-            setFolderPairStatus(session.id, currentPairId, {
+            setFolderPairStatus(sid, currentPairId, {
               kind: "running",
               startedAt: Date.now(),
               token: evt.token,
             });
             break;
           case "stage":
-            setFolderPairStatus(session.id, currentPairId, (prev) =>
+            setFolderPairStatus(sid, currentPairId, (prev) =>
               prev.kind === "running" ? { ...prev, stage: evt.stage } : prev,
             );
             break;
           case "result":
-            setFolderPairStatus(session.id, currentPairId, {
+            setFolderPairStatus(sid, currentPairId, {
               kind: "ok",
               report: evt.report,
               finishedAt: Date.now(),
             });
             break;
           case "done":
-            streamRef.current = null;
+            activeFolderStreams.delete(key);
             break;
           case "cancelled":
-            setFolderPairStatus(session.id, currentPairId, { kind: "cancelled" });
-            streamRef.current = null;
+            setFolderPairStatus(sid, currentPairId, { kind: "cancelled" });
+            activeFolderStreams.delete(key);
             break;
           case "error":
-            setFolderPairStatus(session.id, currentPairId, {
+            setFolderPairStatus(sid, currentPairId, {
               kind: "error",
               message: evt.message,
             });
             toast("error", `Run failed: ${evt.message}`);
-            streamRef.current = null;
+            activeFolderStreams.delete(key);
             break;
         }
       },
     );
+    activeFolderStreams.set(key, handle);
     streamRef.current = handle;
   }, [currentPairId, session.activeReferencePath, session.activeTargetPath, session.id, session.params, setFolderPairStatus]);
 
   const cancelPair = useCallback(() => {
     if (!currentPairId) return;
-    const s = streamRef.current;
+    const key = `${session.id}:${currentPairId}`;
+    const s = activeFolderStreams.get(key) ?? streamRef.current;
+    activeFolderStreams.delete(key);
     streamRef.current = null;
     if (s) void s.cancel();
     setFolderPairStatus(session.id, currentPairId, { kind: "cancelled" });
@@ -456,7 +459,7 @@ export function FolderCompareMode({ session }: Props) {
 
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border">
           <ImageCanvas
-            sessionId={session.id}
+            sessionId={currentPairId ? `${session.id}:${currentPairId}` : session.id}
             src={refSrc}
             label="L"
             placeholder="Pick a file in Folder A on the left"
@@ -471,7 +474,7 @@ export function FolderCompareMode({ session }: Props) {
 
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border relative">
           <ImageCanvas
-            sessionId={session.id}
+            sessionId={currentPairId ? `${session.id}:${currentPairId}` : session.id}
             src={middleSrc}
             headerSlot={
               <LayerDropdown
@@ -506,7 +509,7 @@ export function FolderCompareMode({ session }: Props) {
 
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border">
           <ImageCanvas
-            sessionId={session.id}
+            sessionId={currentPairId ? `${session.id}:${currentPairId}` : session.id}
             src={tgtSrc}
             label="R"
             placeholder="Pick a file in Folder B on the right"
@@ -645,7 +648,7 @@ function FileList({
   }, [cursor, fallbackFiles]);
 
   const atRoot = !rootDir || cursor === rootDir;
-  const currentLabel = cursor ? `/../${basename(cursor)}` : "(no folder)";
+  const currentLabel = cursor ? basename(cursor) : "(no folder)";
 
   const goUp = () => {
     if (!cursor || !rootDir) return;

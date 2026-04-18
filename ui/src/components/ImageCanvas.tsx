@@ -526,7 +526,9 @@ export function ImageCanvas({
 
   const handleSave = useCallback(async () => {
     if (!src || !onSave) return;
-    const FOOTER_H = footerReport ? 140 : 0;
+    // Footer height scales with the image so big exports don't end up
+    // with tiny unreadable text. Minimum 140 px for small inputs.
+    const footerFor = (w: number) => Math.max(140, Math.round(w * 0.07));
     const drawToBlob = (img: HTMLImageElement): Promise<Blob> =>
       new Promise((resolve, reject) => {
         const w = img.naturalWidth;
@@ -535,9 +537,10 @@ export function ImageCanvas({
           reject(new Error("image not loaded"));
           return;
         }
+        const footerH = footerReport ? footerFor(w) : 0;
         const canvas = document.createElement("canvas");
         canvas.width = w;
-        canvas.height = h + FOOTER_H;
+        canvas.height = h + footerH;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           reject(new Error("2d context unavailable"));
@@ -546,7 +549,7 @@ export function ImageCanvas({
         try {
           ctx.drawImage(img, 0, 0, w, h);
           drawAnnotations(ctx, w, h);
-          if (footerReport) drawFooter(ctx, w, h, FOOTER_H, footerReport);
+          if (footerReport) drawFooter(ctx, w, h, footerH, footerReport);
           canvas.toBlob((blob) => {
             if (blob) resolve(blob);
             else reject(new Error("toBlob returned null"));
@@ -940,25 +943,47 @@ export function ColorPalette({
   value: string;
   onChange: (c: string) => void;
 }) {
-  // Extra user-added colours live in local component state: they stay
-  // for this tab's lifetime and re-seed on the next run so users can
-  // add as many custom hues as they like without polluting the spec
-  // palette.
+  // Extra user-added colours live in local component state — they
+  // stick around for this tab's lifetime. Spec palette is never
+  // mutated.
   const [custom, setCustom] = useState<string[]>([]);
-  const pickerRef = useRef<HTMLInputElement>(null);
-  // Whenever the native colour dialog emits a final value we push it
-  // into the custom list (unless it's already there) and activate it.
-  const addCustom = useCallback(
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [draft, setDraft] = useState<string>(value);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Close popover on outside click / Escape, same UX as the layer
+  // dropdown.
+  useEffect(() => {
+    if (!popoverOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setPopoverOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [popoverOpen]);
+
+  const commit = useCallback(
     (hex: string) => {
       const norm = hex.toLowerCase();
       setCustom((prev) => (prev.includes(norm) ? prev : [...prev, norm]));
       onChange(norm);
+      setPopoverOpen(false);
     },
     [onChange],
   );
+
   const palette = [...BOX_COLORS, ...custom];
   return (
-    <div className="flex items-center gap-1">
+    <div ref={wrapperRef} className="flex items-center gap-1 relative">
       {palette.map((c) => (
         <button
           key={c}
@@ -976,22 +1001,75 @@ export function ColorPalette({
       ))}
       <button
         type="button"
-        onClick={() => pickerRef.current?.click()}
-        className="w-5 h-5 rounded border border-dashed border-surface-border-strong text-text-muted hover:text-text hover:border-surface-border flex items-center justify-center transition-colors"
+        onClick={() => {
+          setDraft(value);
+          setPopoverOpen((v) => !v);
+        }}
+        className={cn(
+          "w-5 h-5 rounded border border-dashed text-text-muted flex items-center justify-center transition-colors",
+          popoverOpen
+            ? "border-accent/70 bg-accent/10 text-accent"
+            : "border-surface-border-strong hover:text-text hover:border-surface-border",
+        )}
         title="Add custom colour"
       >
         <Plus size={11} />
       </button>
-      <input
-        ref={pickerRef}
-        type="color"
-        // Keep the dialog truly hidden — we only use it to fire the
-        // system colour picker; the selected value is merged back into
-        // our palette.
-        className="sr-only"
-        tabIndex={-1}
-        onChange={(e) => addCustom(e.target.value)}
-      />
+
+      {popoverOpen && (
+        // Popover anchored to the "+" button — the wrapper is `relative`
+        // so `top-full right-0` places it immediately below / aligned
+        // with the cluster. z-50 beats the image-pane SVG (z-30).
+        <div
+          className="absolute top-full right-0 mt-1 z-50 w-56 rounded-md border border-surface-border bg-surface-raised shadow-lg p-2 animate-dropdown-in origin-top"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="text-[10px] uppercase tracking-wider text-text-faint px-1 pb-1">
+            New colour
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <input
+              type="color"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className="w-8 h-8 rounded border border-surface-border bg-transparent cursor-pointer"
+              aria-label="Custom colour"
+            />
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => {
+                const v = e.target.value;
+                // Accept partial / invalid hex while typing; only
+                // commit when the final pattern matches.
+                if (/^#?[0-9a-fA-F]{0,6}$/.test(v)) {
+                  setDraft(v.startsWith("#") ? v : `#${v}`);
+                }
+              }}
+              className="flex-1 bg-surface-sunken border border-surface-border rounded px-2 py-1 text-[12px] text-text outline-none focus:border-accent/60 font-mono uppercase"
+              placeholder="#rrggbb"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPopoverOpen(false)}
+              className="text-[11px] px-2 py-1 rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (/^#[0-9a-fA-F]{6}$/.test(draft)) commit(draft);
+              }}
+              className="text-[11px] px-2 py-1 rounded bg-accent text-white hover:bg-accent-hot"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
