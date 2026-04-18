@@ -86,11 +86,6 @@ export function ImageCanvas({
   const [hoverDrop, setHoverDrop] = useState(false);
   const [hoverPx, setHoverPx] = useState<{ x: number; y: number } | null>(null);
 
-  // Monotonic src generation — stale img.onload events (from a previous
-  // src that was replaced mid-flight) are ignored. Prevents rapid layer
-  // clicks from flashing an error/"Loading…" state.
-  const srcGenRef = useRef(0);
-
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -111,20 +106,39 @@ export function ImageCanvas({
 
   const onImgLoad = useCallback(
     (e: React.SyntheticEvent<HTMLImageElement>) => {
-      const gen = Number((e.currentTarget as HTMLImageElement).dataset.gen ?? "0");
-      if (gen !== srcGenRef.current) return; // stale load, ignore
-      if (imgRef.current) {
-        setNatural({ w: imgRef.current.naturalWidth, h: imgRef.current.naturalHeight });
+      const el = e.currentTarget as HTMLImageElement;
+      if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+        setNatural({ w: el.naturalWidth, h: el.naturalHeight });
       }
     },
     [],
   );
 
-  // Clear natural size when src changes so a new image reloads cleanly.
+  // Clear natural size when src changes so the new image loads cleanly.
+  // Then, if the browser had the image in its cache, `img.complete` is
+  // already true and onLoad may never fire — pull the dimensions
+  // synchronously from the DOM element. Uses requestAnimationFrame to
+  // let React commit the src update first.
   useEffect(() => {
-    srcGenRef.current += 1;
     setNatural(null);
     setHoverPx(null);
+    if (!src) return;
+    let stopped = false;
+    const check = () => {
+      if (stopped) return;
+      const el = imgRef.current;
+      if (el && el.complete && el.naturalWidth > 0 && el.naturalHeight > 0) {
+        setNatural({ w: el.naturalWidth, h: el.naturalHeight });
+      }
+    };
+    const raf = requestAnimationFrame(check);
+    // Second check slightly later in case decode is still in progress.
+    const t = window.setTimeout(check, 120);
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+    };
   }, [src]);
 
   // --- Zoom -----------------------------------------------------------
@@ -382,6 +396,9 @@ export function ImageCanvas({
 
   // Use CSS transform translate+scale so the browser GPU-scales the
   // texture without re-sampling per frame → much more stable zoom.
+  // Before `natural` is known the img still needs to participate in
+  // layout so the browser actually downloads it; we hide it with
+  // opacity:0 rather than display:none.
   const scaleFactor = natural && box ? box.w / natural.w : 1;
   const imgStyle: React.CSSProperties = box && natural
     ? {
@@ -391,7 +408,12 @@ export function ImageCanvas({
         height: `${natural.h}px`,
         imageRendering: scaleFactor >= 2 ? "pixelated" : "auto",
       }
-    : { display: "none" };
+    : {
+        opacity: 0,
+        pointerEvents: "none",
+        maxWidth: "1px",
+        maxHeight: "1px",
+      };
 
   return (
     <div
@@ -486,7 +508,6 @@ export function ImageCanvas({
           src={src}
           alt={label ?? ""}
           draggable={false}
-          data-gen={srcGenRef.current}
           onLoad={onImgLoad}
           onError={() => {
             /* ignore — natural will remain null and the "Loading…" state shows */
