@@ -45,7 +45,7 @@ export interface UnifiedLayerSpec {
  * where relevant.
  */
 export const UNIFIED_LAYERS: UnifiedLayerSpec[] = [
-  { key: "global_anomaly_map.png",        label: "Anomaly",     color: "#D6521F", intensity: 1.0, floor: 0.45 },
+  { key: "global_anomaly_map.png",        label: "Anomaly",     color: "#D6521F", intensity: 1.0, floor: 0.35 },
   { key: "gibbs_ringing_mask.png",        label: "Ringing",     color: "#4F8AA3", intensity: 1.0, floor: 0.35 },
   { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 1.0, floor: 0.35 },
   { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 1.0, floor: 0.40 },
@@ -194,11 +194,14 @@ export async function buildUnified({
         const floor = L.spec.floor ?? 0.35;
         if (s <= floor) continue;
         const intensity = L.spec.intensity ?? 1.0;
-        const rescaled = Math.min(
-          1,
-          (s - floor) / Math.max(1 / 255, 1 - floor),
-        );
-        const a = Math.min(0.9, rescaled * intensity);
+        // Alpha is the strength directly (not rescaled across the
+        // [floor..1] range). With a steep rescale, moderate anomalies
+        // like a mid-strength green jet pixel just above the floor
+        // would be painted at a few percent alpha and effectively
+        // disappear, hiding real secondary hotspots. Using the raw
+        // strength keeps mid-anomaly regions visible while still
+        // letting reds pop at ~90 %.
+        const a = Math.min(0.9, s * intensity);
         const inv = 1 - a;
         const c = specRgb.get(L.spec.key)!;
         baseData[i]     = c.r * a + baseData[i]     * inv;
