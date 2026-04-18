@@ -453,20 +453,34 @@ export function ImageCanvas({
     [box, cont.h, cont.w, hasVScroll, natural, sessionId, setTransform, transform],
   );
 
-  // Render the image at its fit-scaled size directly (width/height in
-  // CSS pixels) plus a translate. This is the browser's default image
-  // pipeline and consistently fills the pane; the earlier approach of
-  // using a CSS transform scale() on top of natural size rendered at
-  // the wrong position under WebKit. Before `natural` is known the img
-  // still needs to participate in layout so the browser actually
-  // downloads it — we hide it with opacity:0 rather than display:none.
-  const scaleFactor = natural && box ? box.w / natural.w : 1;
+  // Hybrid rendering:
+  //  - The <img> is sized in the DOM at FIT dimensions (natural × the
+  //    fit-to-container ratio, independent of zoom). At zoom == 1 this
+  //    is exactly the on-screen size, so the browser gets to do its
+  //    single high-quality downsample pass once.
+  //  - Zoom is then applied as a CSS transform `scale(zoom)` which the
+  //    compositor can GPU-scale. This means dragging the zoom slider
+  //    or spinning the wheel does NOT trigger a re-decode/re-sample of
+  //    the image each frame — zooming is smooth even on 4K inputs.
+  //  - transform-origin is 0 0 so `translate(box.x, box.y) scale(zoom)`
+  //    places the scaled top-left exactly at (box.x, box.y).
+  //
+  // Before `natural` is known the img still needs to participate in
+  // layout so the browser actually downloads it — we hide it with
+  // opacity:0 rather than display:none.
+  const fitBase = natural && cont.w && cont.h
+    ? fitScale(natural.w, natural.h, cont.w, cont.h)
+    : 1;
+  const fitW = natural ? natural.w * fitBase : 0;
+  const fitH = natural ? natural.h * fitBase : 0;
   const imgStyle: React.CSSProperties = box && natural
     ? {
-        transform: `translate(${box.x}px, ${box.y}px)`,
-        width: `${box.w}px`,
-        height: `${box.h}px`,
-        imageRendering: scaleFactor >= 2 ? "pixelated" : "auto",
+        transform: `translate(${box.x}px, ${box.y}px) scale(${transform.scale})`,
+        transformOrigin: "0 0",
+        width: `${fitW}px`,
+        height: `${fitH}px`,
+        imageRendering: transform.scale >= 2 ? "pixelated" : "auto",
+        willChange: "transform",
       }
     : {
         opacity: 0,
