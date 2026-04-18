@@ -1,11 +1,15 @@
 /**
  * Render the "Unified" artefact-highlight view on the frontend.
  *
- * The base image is rendered as darkened grayscale. Each enabled mask
- * contributes strength only where it is above a per-layer floor. At
- * each pixel we pick the *strongest* layer and tint with its colour
- * (winner-takes-all). Non-artefact regions stay grayscale, keeping the
- * output legible rather than muddy from stacked translucent masks.
+ * The base is the target image in full colour (un-darkened). Each
+ * enabled mask contributes its *own* jet-colormap colours on top, but
+ * only at pixels whose strength is above a per-layer floor — below
+ * floor contributes alpha 0 so the target shows through untinted.
+ *
+ * For structural similarity (where blue == anomaly) the layer is
+ * marked `invert: true` and its strength is flipped before thresholding.
+ *
+ * Multiple enabled layers stack with straight source-over compositing.
  */
 
 import { heatmapDataUrl } from "./api";
@@ -61,45 +65,40 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const h = hex.replace("#", "");
-  return {
-    r: parseInt(h.slice(0, 2), 16),
-    g: parseInt(h.slice(2, 4), 16),
-    b: parseInt(h.slice(4, 6), 16),
-  };
-}
-
-/** Extract a per-pixel scalar strength (0..255) from a colour mask. */
-function extractStrength(
-  img: HTMLImageElement,
-  w: number,
-  h: number,
-): Uint8Array {
-  const buf = document.createElement("canvas");
-  buf.width = w;
-  buf.height = h;
-  const ctx = buf.getContext("2d");
-  if (!ctx) return new Uint8Array(w * h);
-  ctx.drawImage(img, 0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h).data;
-  const out = new Uint8Array(w * h);
-  for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    const peak = Math.max(r, g, b);
-    // Works for both binary masks and jet-colourmapped continuous heatmaps.
-    out[j] = Math.max(lum, peak) | 0;
-  }
-  return out;
-}
-
 export interface BuildUnifiedArgs {
   targetSrc: string;
   heatmaps: Record<string, string>;
   enabled: Set<string>;
+}
+
+/** Load a mask and return both its strength channel and its per-pixel
+ * RGB (from the jet colormap or binary white mask). */
+function extractMaskRGBA(
+  img: HTMLImageElement,
+  w: number,
+  h: number,
+): { strength: Uint8Array; rgb: Uint8ClampedArray } {
+  const buf = document.createElement("canvas");
+  buf.width = w;
+  buf.height = h;
+  const ctx = buf.getContext("2d");
+  const rgb = new Uint8ClampedArray(w * h * 3);
+  const strength = new Uint8Array(w * h);
+  if (!ctx) return { strength, rgb };
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  for (let i = 0, j = 0, k = 0; i < data.length; i += 4, j += 1, k += 3) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    rgb[k] = r;
+    rgb[k + 1] = g;
+    rgb[k + 2] = b;
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const peak = Math.max(r, g, b);
+    strength[j] = Math.max(lum, peak) | 0;
+  }
+  return { strength, rgb };
 }
 
 export async function buildUnified({
@@ -107,15 +106,6 @@ export async function buildUnified({
   heatmaps,
   enabled,
 }: BuildUnifiedArgs): Promise<string | null> {
-  // Fast-path: exactly one layer enabled — show the raw heatmap image
-  // directly (same visual as picking that specific layer from the
-  // dropdown). The winner-takes-all composite is only useful when 2+
-  // layers are stacked.
-  if (enabled.size === 1) {
-    const only = [...enabled][0];
-    const b64 = heatmaps[only];
-    if (b64) return heatmapDataUrl(b64);
-  }
   try {
     const base = await loadImage(targetSrc);
     const w = base.naturalWidth;
@@ -126,26 +116,18 @@ export async function buildUnified({
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
 
-    // 1. Paint a darkened grayscale base so artefact tints pop.
+    // 1. Paint the target image in full colour as the base. Pixels
+    //    where no layer exceeds its floor will show the target as-is.
     ctx.drawImage(base, 0, 0, w, h);
     const baseImg = ctx.getImageData(0, 0, w, h);
     const baseData = baseImg.data;
-    for (let i = 0; i < baseData.length; i += 4) {
-      const r = baseData[i];
-      const g = baseData[i + 1];
-      const b = baseData[i + 2];
-      const lum = 0.2989 * r + 0.587 * g + 0.114 * b;
-      const dim = lum * 0.7;
-      baseData[i] = dim;
-      baseData[i + 1] = dim;
-      baseData[i + 2] = dim;
-    }
 
-    // 2. Extract per-pixel strength for each enabled mask.
+    // 2. Load each enabled mask with both its strength channel AND
+    //    its original per-pixel RGB (jet colours).
     const layers: {
       spec: UnifiedLayerSpec;
       strength: Uint8Array;
-      rgb: { r: number; g: number; b: number };
+      rgb: Uint8ClampedArray;
     }[] = [];
     for (const spec of UNIFIED_LAYERS) {
       if (!enabled.has(spec.key)) continue;
@@ -153,31 +135,25 @@ export async function buildUnified({
       if (!b64) continue;
       try {
         const mask = await loadImage(heatmapDataUrl(b64));
-        layers.push({
-          spec,
-          strength: extractStrength(mask, w, h),
-          rgb: hexToRgb(spec.color),
-        });
+        const { strength, rgb } = extractMaskRGBA(mask, w, h);
+        layers.push({ spec, strength, rgb });
       } catch {
         /* unreadable mask → skip */
       }
     }
 
     if (layers.length === 0) {
-      ctx.putImageData(baseImg, 0, 0);
       return canvas.toDataURL("image/png");
     }
 
-    // 3. Winner-takes-all per pixel: above-floor max wins, gets tinted.
+    // 3. For each pixel, alpha-composite each enabled mask's ORIGINAL
+    //    jet colours over the base, with alpha = rescaled strength-
+    //    above-floor. Below-floor pixels contribute alpha 0 → the
+    //    target image shows through untinted.
     const N = w * h;
-    for (let p = 0, i = 0; p < N; p += 1, i += 4) {
-      let bestAlpha = 0;
-      let bestR = 0, bestG = 0, bestB = 0;
+    for (let p = 0, i = 0, k = 0; p < N; p += 1, i += 4, k += 3) {
       for (const L of layers) {
         const raw = L.strength[p] / 255;
-        // For "invert" layers (structural similarity) we want to tint
-        // where the raw value is LOW. Flip before the floor check so
-        // `floor` still means "must be at least this anomalous".
         const s = L.spec.invert ? 1 - raw : raw;
         const floor = L.spec.floor ?? 0.35;
         if (s <= floor) continue;
@@ -186,20 +162,11 @@ export async function buildUnified({
           1,
           (s - floor) / Math.max(1 / 255, 1 - floor),
         );
-        const a = rescaled * intensity;
-        if (a > bestAlpha) {
-          bestAlpha = a;
-          bestR = L.rgb.r;
-          bestG = L.rgb.g;
-          bestB = L.rgb.b;
-        }
-      }
-      if (bestAlpha > 0) {
-        const a = Math.min(0.85, bestAlpha);
+        const a = Math.min(0.9, rescaled * intensity);
         const inv = 1 - a;
-        baseData[i] = bestR * a + baseData[i] * inv;
-        baseData[i + 1] = bestG * a + baseData[i + 1] * inv;
-        baseData[i + 2] = bestB * a + baseData[i + 2] * inv;
+        baseData[i]     = L.rgb[k]     * a + baseData[i]     * inv;
+        baseData[i + 1] = L.rgb[k + 1] * a + baseData[i + 1] * inv;
+        baseData[i + 2] = L.rgb[k + 2] * a + baseData[i + 2] * inv;
       }
     }
     ctx.putImageData(baseImg, 0, 0);

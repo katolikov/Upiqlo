@@ -87,8 +87,12 @@ export default {
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
         "dropdown-in": {
-          "0%": { opacity: "0", transform: "translateY(-4px) scaleY(0.96)" },
-          "100%": { opacity: "1", transform: "translateY(0) scaleY(1)" },
+          // Preserve the `-translate-x-1/2` (translateX(-50%)) that the
+          // menu uses to stay horizontally centred under its trigger;
+          // without it the menu jumps from right-edge to centre when
+          // the animation ends.
+          "0%": { opacity: "0", transform: "translateX(-50%) translateY(-4px) scaleY(0.96)" },
+          "100%": { opacity: "1", transform: "translateX(-50%) translateY(0) scaleY(1)" },
         },
       },
       animation: {
