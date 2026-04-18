@@ -253,17 +253,26 @@ export function SingleCompareMode({ session }: Props) {
     (id: string) => removeAnnotation(session.id, id),
     [removeAnnotation, session.id],
   );
-  const onSaveImage = useCallback((blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast("success", `Saved ${filename}`);
-  }, []);
+  const onSaveImage = useCallback(
+    (blob: Blob, filename: string, writtenPath?: string) => {
+      if (writtenPath) {
+        // File was already persisted next to the source by ImageCanvas.
+        toast("success", `Saved to ${writtenPath}`);
+        return;
+      }
+      // Fallback: trigger a browser download.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast("success", `Saved ${filename}`);
+    },
+    [],
+  );
 
   const toggleLayer = useCallback((key: UnifiedArtifact) => {
     setUnifiedToggled((prev) => {
@@ -374,6 +383,7 @@ export function SingleCompareMode({ session }: Props) {
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
             saveFilenameBase={`${basename(session.referencePath) || "reference"}-annotated`}
+            sourcePath={session.referencePath}
             onDropPath={onCommitA}
           />
         </div>
@@ -397,6 +407,8 @@ export function SingleCompareMode({ session }: Props) {
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
             saveFilenameBase={`${labelFor(session.layer)}-annotated`}
+            sourcePath={session.targetPath}
+            saveVariant={layerSlug(session.layer)}
           />
           {session.layer === "diagnostic_overlay.png" && report && (
             <div className="absolute top-12 left-2 z-10 pointer-events-auto">
@@ -420,6 +432,7 @@ export function SingleCompareMode({ session }: Props) {
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
             saveFilenameBase={`${basename(session.targetPath) || "target"}-annotated`}
+            sourcePath={session.targetPath}
             onDropPath={onCommitB}
           />
         </div>
@@ -444,7 +457,6 @@ function labelFor(layer: string): string {
     (
       [
         ["diagnostic_overlay.png", "Unified"],
-        ["anomaly_highlight.png", "Anomaly Highlight"],
         ["anomaly_overlay.png", "Anomaly Overlay"],
         ["global_anomaly_map.png", "Anomaly Map"],
         ["structural_similarity_map.png", "Structure"],
@@ -455,4 +467,9 @@ function labelFor(layer: string): string {
       ] as const
     ).find(([k]) => k === layer)?.[1] ?? layer
   );
+}
+
+/** Filename-friendly suffix for the output pane's saved copy. */
+function layerSlug(layer: string): string {
+  return labelFor(layer).toLowerCase().replace(/\s+/g, "_");
 }

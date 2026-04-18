@@ -100,6 +100,15 @@ export async function buildUnified({
   heatmaps,
   enabled,
 }: BuildUnifiedArgs): Promise<string | null> {
+  // Fast-path: exactly one layer enabled — show the raw heatmap image
+  // directly (same visual as picking that specific layer from the
+  // dropdown). The winner-takes-all composite is only useful when 2+
+  // layers are stacked.
+  if (enabled.size === 1) {
+    const only = [...enabled][0];
+    const b64 = heatmaps[only];
+    if (b64) return heatmapDataUrl(b64);
+  }
   try {
     const base = await loadImage(targetSrc);
     const w = base.naturalWidth;

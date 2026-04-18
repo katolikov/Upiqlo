@@ -20,7 +20,6 @@ export type CompareStatus =
 
 export type HeatmapLayer =
   | "diagnostic_overlay.png"
-  | "anomaly_highlight.png"
   | "anomaly_overlay.png"
   | "global_anomaly_map.png"
   | "structural_similarity_map.png"
@@ -35,8 +34,6 @@ export const HEATMAP_LAYERS: {
   group: "semantic" | "structural" | "heuristic";
 }[] = [
   { key: "diagnostic_overlay.png", label: "Unified", group: "semantic" },
-  // Grayscale context + vivid colour only where anomalies are detected.
-  { key: "anomaly_highlight.png", label: "Anomaly Highlight", group: "semantic" },
   { key: "anomaly_overlay.png", label: "Anomaly Overlay", group: "semantic" },
   { key: "global_anomaly_map.png", label: "Anomaly Map", group: "semantic" },
   { key: "structural_similarity_map.png", label: "Structure", group: "structural" },

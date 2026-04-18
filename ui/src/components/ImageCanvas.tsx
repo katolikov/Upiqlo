@@ -11,6 +11,26 @@ import {
 import { useViewport } from "@/state/viewport";
 import type { BoundingBox } from "@/state/sessions";
 import { toast } from "@/state/toast";
+import { isTauri } from "@/lib/assets";
+
+/** "/a/b/image.png" → "/a/b/image_upiqal.png" (or with a variant
+ * suffix). Works for both POSIX and Windows paths. */
+function buildUpiqalDestination(sourcePath: string, variant?: string): string {
+  const sep = sourcePath.includes("\\") && !sourcePath.includes("/") ? "\\" : "/";
+  const lastSepIx = Math.max(sourcePath.lastIndexOf("/"), sourcePath.lastIndexOf("\\"));
+  const dir = lastSepIx >= 0 ? sourcePath.slice(0, lastSepIx) : "";
+  const file = lastSepIx >= 0 ? sourcePath.slice(lastSepIx + 1) : sourcePath;
+  const dotIx = file.lastIndexOf(".");
+  const stem = dotIx > 0 ? file.slice(0, dotIx) : file;
+  const suffix = variant ? `_upiqal_${variant}` : "_upiqal";
+  const filename = `${stem}${suffix}.png`;
+  return dir ? `${dir}${sep}${filename}` : filename;
+}
+
+function basename(p: string): string {
+  const ix = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return ix >= 0 ? p.slice(ix + 1) : p;
+}
 
 /**
  * Universal image pane.
@@ -37,8 +57,17 @@ export interface ImageCanvasProps {
   onDrawBox?: (box: BoundingBox) => void;
   onDeleteBox?: (id: string) => void;
   drawColor?: string;
-  onSave?: (blob: Blob, filename: string) => void;
+  onSave?: (blob: Blob, filename: string, writtenPath?: string) => void;
   saveFilenameBase?: string;
+  /** Absolute path of the image this canvas displays (when backed by
+   * a filesystem file). When provided, "Save copy" writes the new PNG
+   * to that file's directory as `<stem>_upiqal<suffix>.png` via the
+   * Tauri fs plugin, and onSave receives the written path. Without
+   * it, the blob is delivered as a normal browser download. */
+  sourcePath?: string | null;
+  /** Optional suffix appended between the stem and `_upiqal`, e.g.
+   * `anomaly_map` → `<stem>_upiqal_anomaly_map.png`. */
+  saveVariant?: string;
   onDropPath?: (path: string) => void;
 }
 
@@ -67,6 +96,8 @@ export function ImageCanvas({
   drawColor = BOX_COLORS[0],
   onSave,
   saveFilenameBase = "upiqlo",
+  sourcePath = null,
+  saveVariant,
   onDropPath,
 }: ImageCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -190,9 +221,14 @@ export function ImageCanvas({
       const target = e.target as HTMLElement | null;
       if (
         target &&
-        target.closest(
-          "button, a, select, input, textarea, [data-ui], [role='button']",
-        )
+        // HTMLElement selectors use closest(); SVG elements are
+        // matched separately because SVGElement doesn't have the same
+        // DOM inheritance in every WebKit build.
+        (target.closest?.(
+          "button, a, select, input, textarea, [data-ui], [data-annot], [role='button']",
+        ) ||
+          ("ownerSVGElement" in target &&
+            (target as unknown as SVGElement).getAttribute("data-annot") === "true"))
       ) {
         return;
       }
@@ -376,43 +412,63 @@ export function ImageCanvas({
         }
       });
 
+    let outBlob: Blob | null = null;
     try {
       // --- Path 1: use the already-loaded imgRef -----------------
       const el = imgRef.current;
       if (el && el.complete && el.naturalWidth > 0) {
         try {
-          const blob = await drawToBlob(el);
-          onSave(blob, `${saveFilenameBase}.png`);
-          return;
+          outBlob = await drawToBlob(el);
         } catch (err) {
           // Likely a tainted canvas — fall through to path 2.
           console.warn("direct draw failed, falling back to fetch", err);
         }
       }
 
-      // --- Path 2: fetch bytes then redraw via blob: URL ---------
-      const resp = await fetch(src);
-      if (!resp.ok) throw new Error(`fetch ${resp.status}`);
-      const blobIn = await resp.blob();
-      const objectUrl = URL.createObjectURL(blobIn);
-      try {
-        const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new window.Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error("image load failed"));
-          img.src = objectUrl;
-        });
-        const out = await drawToBlob(image);
-        onSave(out, `${saveFilenameBase}.png`);
-      } finally {
-        URL.revokeObjectURL(objectUrl);
+      if (!outBlob) {
+        // --- Path 2: fetch bytes then redraw via blob: URL -------
+        const resp = await fetch(src);
+        if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+        const blobIn = await resp.blob();
+        const objectUrl = URL.createObjectURL(blobIn);
+        try {
+          const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new window.Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("image load failed"));
+            img.src = objectUrl;
+          });
+          outBlob = await drawToBlob(image);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      }
+
+      // --- Destination ------------------------------------------
+      // When a sourcePath is known AND we're inside Tauri, write the
+      // new PNG next to it with a `_upiqal[_variant].png` suffix. The
+      // consumer's onSave callback still fires (so it can show a toast
+      // and register the path in session memory), but no browser
+      // download is triggered.
+      const destinationPath =
+        sourcePath && isTauri()
+          ? buildUpiqalDestination(sourcePath, saveVariant)
+          : null;
+
+      if (destinationPath) {
+        const bytes = new Uint8Array(await outBlob.arrayBuffer());
+        const fs = await import("@tauri-apps/plugin-fs");
+        await fs.writeFile(destinationPath, bytes);
+        onSave(outBlob, basename(destinationPath), destinationPath);
+      } else {
+        onSave(outBlob, `${saveFilenameBase}.png`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("save failed", err);
       toast("error", `Save failed: ${msg}`);
     }
-  }, [drawAnnotations, onSave, saveFilenameBase, src]);
+  }, [drawAnnotations, onSave, saveFilenameBase, sourcePath, saveVariant, src]);
 
   // --- Scrollbars -----------------------------------------------------
   const hasHScroll = !!box && box.w > cont.w + 0.5;
@@ -638,6 +694,7 @@ export function ImageCanvas({
                   fill="none"
                   stroke={b.color}
                   strokeWidth={2.5}
+                  data-annot="true"
                   onClick={(e) => { e.stopPropagation(); if (onDeleteBox) onDeleteBox(b.id); }}
                   style={{ pointerEvents: onDeleteBox ? "auto" : "none", cursor: onDeleteBox ? "pointer" : "default" }}
                 />
