@@ -28,6 +28,11 @@ export interface UnifiedLayerSpec {
   /** 0..1 — mask values below this are treated as "no artefact" (zero
    * alpha). Raise to strip the low-value tail of the jet colourmap. */
   floor?: number;
+  /** For layers where LOW (blue) means artefact — structural similarity
+   * is high where the reference and target agree, so the "anomaly"
+   * is the blue/low-value region. Setting invert: true flips the
+   * strength before the floor check. */
+  invert?: boolean;
 }
 
 /**
@@ -41,7 +46,9 @@ export const UNIFIED_LAYERS: UnifiedLayerSpec[] = [
   { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 1.0, floor: 0.35 },
   { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 1.0, floor: 0.40 },
   { key: "color_degradation_map.png",     label: "Color shift", color: "#B84A6C", intensity: 1.0, floor: 0.40 },
-  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 1.0, floor: 0.50 },
+  // Structural similarity is HIGH where images agree — the anomaly is
+  // the blue/low-value region, so invert the strength before thresholding.
+  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 1.0, floor: 0.50, invert: true },
 ];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -167,7 +174,11 @@ export async function buildUnified({
       let bestAlpha = 0;
       let bestR = 0, bestG = 0, bestB = 0;
       for (const L of layers) {
-        const s = L.strength[p] / 255;
+        const raw = L.strength[p] / 255;
+        // For "invert" layers (structural similarity) we want to tint
+        // where the raw value is LOW. Flip before the floor check so
+        // `floor` still means "must be at least this anomalous".
+        const s = L.spec.invert ? 1 - raw : raw;
         const floor = L.spec.floor ?? 0.35;
         if (s <= floor) continue;
         const intensity = L.spec.intensity ?? 1.0;

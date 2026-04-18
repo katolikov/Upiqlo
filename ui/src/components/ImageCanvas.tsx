@@ -10,6 +10,7 @@ import {
 } from "@/lib/viewport-math";
 import { useViewport } from "@/state/viewport";
 import type { BoundingBox } from "@/state/sessions";
+import type { CompareReport } from "@/types/report";
 import { toast } from "@/state/toast";
 import { isTauri } from "@/lib/assets";
 
@@ -30,6 +31,108 @@ function buildUpiqalDestination(sourcePath: string, variant?: string): string {
 function basename(p: string): string {
   const ix = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return ix >= 0 ? p.slice(ix + 1) : p;
+}
+
+/**
+ * Burn the metrics-dashboard row into the bottom of the saved image:
+ * score, dominant artefact, severities with bars, resolution. Laid out
+ * as a single strip the full image width so it reads at any aspect
+ * ratio.
+ */
+function drawFooter(
+  ctx: CanvasRenderingContext2D,
+  imgW: number,
+  imgY: number,
+  footerH: number,
+  report: CompareReport,
+): void {
+  const y0 = imgY;
+  // Dark band that sits flush against the bottom of the image.
+  ctx.fillStyle = "#1a1612";
+  ctx.fillRect(0, y0, imgW, footerH);
+  ctx.fillStyle = "#3a3230";
+  ctx.fillRect(0, y0, imgW, 1);
+
+  const padX = 24;
+  const padY = 18;
+  const labelSize = Math.max(10, Math.round(footerH * 0.1));
+  const valueSize = Math.max(18, Math.round(footerH * 0.22));
+
+  const severities: [string, number][] = [];
+  const sev = report.diagnostics.severity_scores;
+  if (sev.blocking !== undefined) severities.push(["JPEG Blocking", sev.blocking]);
+  if (sev.ringing !== undefined) severities.push(["Gibbs Ringing", sev.ringing]);
+  if (sev.noise !== undefined) severities.push(["Gaussian Noise", sev.noise]);
+  if (sev.color_shift !== undefined) severities.push(["Color Shift", sev.color_shift]);
+  if (sev.blur !== undefined) severities.push(["Blur", sev.blur]);
+
+  // Column widths: score+dominant fixed-width on the left, then
+  // severities fill the middle, resolution sticks to the right.
+  const leftW = Math.min(480, imgW * 0.28);
+  const rightW = Math.min(220, imgW * 0.14);
+  const midW = imgW - leftW - rightW - padX * 2;
+  const colW = severities.length > 0 ? midW / severities.length : 0;
+
+  // --- Left: score + label + dominant --------------------------------
+  let x = padX;
+  ctx.fillStyle = "#8f857a";
+  ctx.font = `${labelSize}px system-ui, sans-serif`;
+  ctx.fillText("FR-IQA SCORE", x, y0 + padY + labelSize);
+  const scoreColor =
+    report.score >= 0.75 ? "#6aa36b" : report.score >= 0.45 ? "#c48a42" : "#c85b5b";
+  ctx.fillStyle = scoreColor;
+  ctx.font = `bold ${valueSize}px system-ui, sans-serif`;
+  ctx.fillText(report.score.toFixed(3), x, y0 + padY + labelSize + valueSize + 4);
+  ctx.fillStyle = "#c8c0b2";
+  ctx.font = `${labelSize + 2}px system-ui, sans-serif`;
+  ctx.fillText(
+    `${report.score_label} · ${report.diagnostics.dominant_artifact}`,
+    x,
+    y0 + padY + labelSize + valueSize + labelSize + 16,
+  );
+
+  // --- Middle: severity columns with bars ----------------------------
+  x = padX + leftW;
+  severities.forEach(([name, value], i) => {
+    const cx = x + i * colW;
+    ctx.fillStyle = "#8f857a";
+    ctx.font = `${labelSize}px system-ui, sans-serif`;
+    ctx.fillText(name.toUpperCase(), cx, y0 + padY + labelSize);
+
+    ctx.fillStyle = "#ede6d9";
+    ctx.font = `bold ${valueSize - 4}px system-ui, sans-serif`;
+    ctx.fillText(value.toFixed(1), cx, y0 + padY + labelSize + valueSize);
+
+    // Bar track
+    const barY = y0 + padY + labelSize + valueSize + 10;
+    const barW = colW - 16;
+    ctx.fillStyle = "#2a2420";
+    ctx.fillRect(cx, barY, barW, 6);
+    const clamped = Math.max(0, Math.min(100, value));
+    const barColor =
+      clamped >= 70 ? "#c85b5b" : clamped >= 40 ? "#c48a42" : clamped >= 15 ? "#6aa36b" : "#4f7a4f";
+    ctx.fillStyle = barColor;
+    ctx.fillRect(cx, barY, barW * (clamped / 100), 6);
+  });
+
+  // --- Right: resolution --------------------------------------------
+  const { width, height } = report.image_resolution;
+  x = imgW - padX - rightW;
+  ctx.fillStyle = "#8f857a";
+  ctx.font = `${labelSize}px system-ui, sans-serif`;
+  ctx.fillText("RESOLUTION", x, y0 + padY + labelSize);
+  ctx.fillStyle = "#ede6d9";
+  ctx.font = `bold ${valueSize - 4}px system-ui, sans-serif`;
+  ctx.fillText(`${width}×${height}`, x, y0 + padY + labelSize + valueSize);
+
+  // Upiqlo wordmark
+  ctx.fillStyle = "#6a625a";
+  ctx.font = `${labelSize}px system-ui, sans-serif`;
+  ctx.fillText(
+    "Upiqlo · FR-IQA",
+    x,
+    y0 + padY + labelSize + valueSize + labelSize + 16,
+  );
 }
 
 /**
@@ -68,6 +171,10 @@ export interface ImageCanvasProps {
   /** Optional suffix appended between the stem and `_upiqal`, e.g.
    * `anomaly_map` → `<stem>_upiqal_anomaly_map.png`. */
   saveVariant?: string;
+  /** When provided, a stats footer is burnt into the bottom of the
+   * saved PNG — score, dominant artefact, per-severity bars and
+   * resolution, in the same layout as the on-screen MetricsDashboard. */
+  footerReport?: CompareReport | null;
   onDropPath?: (path: string) => void;
 }
 
@@ -98,6 +205,7 @@ export function ImageCanvas({
   saveFilenameBase = "upiqlo",
   sourcePath = null,
   saveVariant,
+  footerReport = null,
   onDropPath,
 }: ImageCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -312,7 +420,28 @@ export function ImageCanvas({
   );
 
   const onPointerLeave = useCallback(() => setHoverPx(null), []);
-  const onDoubleClick = useCallback(() => reset(sessionId), [reset, sessionId]);
+  const onDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Rapid +/- button taps cause the browser to synthesise a dblclick
+      // on the container (because the taps land near each other); that
+      // was calling reset() and snapping the zoom back to 100%. Skip
+      // reset when the dblclick originated on any interactive element
+      // inside the pane.
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.closest?.(
+          "button, a, select, input, textarea, [data-ui], [data-annot], [role='button']",
+        ) ||
+          ("ownerSVGElement" in t &&
+            (t as unknown as SVGElement).getAttribute("data-annot") === "true"))
+      ) {
+        return;
+      }
+      reset(sessionId);
+    },
+    [reset, sessionId],
+  );
 
   // --- Drag-and-drop --------------------------------------------------
   const onHtmlDragOver = useCallback(
@@ -384,6 +513,7 @@ export function ImageCanvas({
 
   const handleSave = useCallback(async () => {
     if (!src || !onSave) return;
+    const FOOTER_H = footerReport ? 140 : 0;
     const drawToBlob = (img: HTMLImageElement): Promise<Blob> =>
       new Promise((resolve, reject) => {
         const w = img.naturalWidth;
@@ -394,7 +524,7 @@ export function ImageCanvas({
         }
         const canvas = document.createElement("canvas");
         canvas.width = w;
-        canvas.height = h;
+        canvas.height = h + FOOTER_H;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           reject(new Error("2d context unavailable"));
@@ -403,6 +533,7 @@ export function ImageCanvas({
         try {
           ctx.drawImage(img, 0, 0, w, h);
           drawAnnotations(ctx, w, h);
+          if (footerReport) drawFooter(ctx, w, h, FOOTER_H, footerReport);
           canvas.toBlob((blob) => {
             if (blob) resolve(blob);
             else reject(new Error("toBlob returned null"));
@@ -468,7 +599,7 @@ export function ImageCanvas({
       console.error("save failed", err);
       toast("error", `Save failed: ${msg}`);
     }
-  }, [drawAnnotations, onSave, saveFilenameBase, sourcePath, saveVariant, src]);
+  }, [drawAnnotations, footerReport, onSave, saveFilenameBase, sourcePath, saveVariant, src]);
 
   // --- Scrollbars -----------------------------------------------------
   const hasHScroll = !!box && box.w > cont.w + 0.5;

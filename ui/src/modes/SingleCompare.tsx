@@ -384,6 +384,7 @@ export function SingleCompareMode({ session }: Props) {
             onSave={onSaveImage}
             saveFilenameBase={`${basename(session.referencePath) || "reference"}-annotated`}
             sourcePath={session.referencePath}
+            footerReport={report}
             onDropPath={onCommitA}
           />
         </div>
@@ -409,6 +410,7 @@ export function SingleCompareMode({ session }: Props) {
             saveFilenameBase={`${labelFor(session.layer)}-annotated`}
             sourcePath={session.targetPath}
             saveVariant={layerSlug(session.layer)}
+            footerReport={report}
           />
           {session.layer === "diagnostic_overlay.png" && report && (
             <div className="absolute top-12 left-2 z-10 pointer-events-auto">
@@ -433,6 +435,7 @@ export function SingleCompareMode({ session }: Props) {
             onSave={onSaveImage}
             saveFilenameBase={`${basename(session.targetPath) || "target"}-annotated`}
             sourcePath={session.targetPath}
+            footerReport={report}
             onDropPath={onCommitB}
           />
         </div>

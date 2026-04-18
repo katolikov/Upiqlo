@@ -427,6 +427,7 @@ export function FolderCompareMode({ session }: Props) {
             onSave={onSaveImage}
             saveFilenameBase={`${basename(session.activeReferencePath) || "reference"}-annotated`}
             sourcePath={session.activeReferencePath}
+            footerReport={report}
           />
         </div>
 
@@ -451,6 +452,7 @@ export function FolderCompareMode({ session }: Props) {
             saveFilenameBase={`${labelFor(session.layer)}-annotated`}
             sourcePath={session.activeTargetPath}
             saveVariant={layerSlug(session.layer)}
+            footerReport={report}
           />
           {session.layer === "diagnostic_overlay.png" && report && (
             <div className="absolute top-12 left-2 z-10 pointer-events-auto">
@@ -475,6 +477,7 @@ export function FolderCompareMode({ session }: Props) {
             onSave={onSaveImage}
             saveFilenameBase={`${basename(session.activeTargetPath) || "target"}-annotated`}
             sourcePath={session.activeTargetPath}
+            footerReport={report}
           />
         </div>
 
