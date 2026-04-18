@@ -15,6 +15,9 @@ interface Props {
   /** Path(s) currently selected for this session — used to decide whether
    * to reveal the RAW-config row (width / height / pixel_format). */
   activePaths?: (string | null | undefined)[];
+  /** Right-aligned action slot on the top row (typically the Run /
+   * Cancel button). */
+  action?: React.ReactNode;
 }
 
 /**
@@ -27,7 +30,7 @@ interface Props {
  * When the user selects a RAW file (.raw / .bin / .yuv / .nv21 / .nv12),
  * the RAW row appears automatically with the required fields.
  */
-export function SessionConfigBar({ sessionId, params, activePaths }: Props) {
+export function SessionConfigBar({ sessionId, params, activePaths, action }: Props) {
   const updateParams = useSessions((s) => s.updateParams);
   const resetParams = useSessions((s) => s.resetParams);
 
@@ -86,6 +89,7 @@ export function SessionConfigBar({ sessionId, params, activePaths }: Props) {
         >
           <RotateCcw size={12} /> Reset
         </button>
+        {action && <div className="ml-auto shrink-0 flex items-center">{action}</div>}
       </div>
 
       {showRaw && (

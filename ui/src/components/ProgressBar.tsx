@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CompareStatus } from "@/state/sessions";
@@ -5,17 +6,62 @@ import type { CompareStatus } from "@/state/sessions";
 interface Props {
   status: Extract<CompareStatus, { kind: "running" }>;
   className?: string;
+  /** Optional: how many seconds we expect a full run to take. Used to
+   * ease-fill the bar between stage events so it never looks frozen. */
+  expectedSeconds?: number;
 }
 
 /**
- * Inline progress strip shown next to the Cancel button while a stream is
- * live. Stays smooth during reconnects / state drops: if no stage event
- * has arrived yet we show an indeterminate spinner; once we have stages
- * the bar grows deterministically from 0..100%.
+ * Smoothly-animated progress bar.
+ *
+ * Stage events arrive at discrete moments (e.g. 1/5 then 3/5 then 5/5).
+ * Naively tying the bar width to index/total makes it "jump". We
+ * interpolate between successive stage events with ease-out, and during
+ * stretches without new events we creep the bar toward the next stage
+ * boundary using the `expectedSeconds` hint so the user sees motion.
  */
-export function ProgressBar({ status, className }: Props) {
+export function ProgressBar({
+  status,
+  className,
+  expectedSeconds = 8,
+}: Props) {
   const stage = status.stage;
-  const pct = stage ? Math.round((stage.index / stage.total) * 100) : null;
+  const target = stage ? Math.max(0, Math.min(1, stage.index / stage.total)) : 0;
+
+  const [value, setValue] = useState(target);
+  const prevTarget = useRef(target);
+  const started = useRef(Date.now());
+
+  useEffect(() => {
+    let raf = 0;
+    const animate = () => {
+      setValue((cur) => {
+        const runtime = (Date.now() - started.current) / 1000;
+        let goal = target;
+        if (stage) {
+          const perStage = Math.max(0.5, expectedSeconds / stage.total);
+          const inStageProgress = Math.min(1, (runtime % perStage) / perStage);
+          const nextBoundary = Math.min(1, (stage.index + inStageProgress * 0.6) / stage.total);
+          goal = Math.max(target, nextBoundary);
+        }
+        const delta = goal - cur;
+        if (Math.abs(delta) < 0.0005) return cur;
+        return cur + delta * 0.1;
+      });
+      raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, [expectedSeconds, stage, target]);
+
+  useEffect(() => {
+    if (prevTarget.current !== target) {
+      prevTarget.current = target;
+      started.current = Date.now();
+    }
+  }, [target]);
+
+  const pct = Math.round(value * 100);
 
   return (
     <div
@@ -26,14 +72,11 @@ export function ProgressBar({ status, className }: Props) {
     >
       <Loader2 size={13} className="shrink-0 animate-spin text-accent" />
 
-      <div className="flex-1 min-w-0 max-w-md">
+      <div className="flex-1 min-w-0">
         <div className="h-1.5 rounded-full bg-surface-sunken overflow-hidden">
           <div
-            className={cn(
-              "h-full rounded-full transition-[width] duration-300 ease-out bg-accent",
-              pct === null && "w-1/4 animate-pulse",
-            )}
-            style={pct !== null ? { width: `${pct}%` } : undefined}
+            className="h-full rounded-full bg-accent"
+            style={{ width: `${pct}%` }}
           />
         </div>
       </div>

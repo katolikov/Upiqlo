@@ -12,24 +12,30 @@ import { useViewport } from "@/state/viewport";
 import type { BoundingBox } from "@/state/sessions";
 
 /**
- * Fully-featured image pane used by Reference / Output / Target.
+ * Universal image pane.
  *
- * Controls:
- *   - Left-click + drag  → pan.
- *   - Scroll wheel       → zoom in/out, anchored at the cursor.
- *   - Right-click + drag → draw a bounding box (only when drawable=true).
- *   - Double-click       → reset to fit.
- *   - Drag image file    → loads that image (OS drop via Tauri or HTML5).
- *   - Overlay buttons    → "+" zoom-in, "−" zoom-out, "Reset", "Save".
- *   - Scrollbars         → horizontal / vertical panning via UI thumbs.
+ * Container size is fixed by its parent (flex column); zooming never
+ * resizes the container — only the image inside transforms. Annotations
+ * live in normalised [0, 1] image coordinates so they stay anchored to
+ * their pixels during pan / zoom.
  *
- * The image fits the column exactly at `transform.scale === 1` (fit-scale
- * is applied separately) and never overflows.
+ * Controls
+ * --------
+ *   Left-click + drag  → pan
+ *   Scroll wheel       → zoom anchored at cursor
+ *   Right-click + drag → draw a bounding box (drawable=true only)
+ *   Double-click       → reset to fit
+ *   +/− buttons        → zoom anchored at container centre
+ *   Scrollbar drag     → pan via UI thumb
+ *   OS drag-and-drop   → loads the file when onDropPath is provided
  */
 export interface ImageCanvasProps {
   sessionId: string;
   src: string | null;
-  label: string;
+  label?: string;
+  /** Replaces the default label chip with a custom element (used for the
+   * Output pane's merged dropdown-title). */
+  headerSlot?: React.ReactNode;
   placeholder?: string;
   className?: string;
   controls?: boolean;
@@ -43,20 +49,21 @@ export interface ImageCanvasProps {
   onDropPath?: (path: string) => void;
 }
 
-/** Vibrant, high-contrast colour palette — reads on any background. */
+/** Professional palette: distinct hues, comfortably saturated, not neon. */
 export const BOX_COLORS: string[] = [
-  "#00FF7F", // Neon spring green
-  "#FF00E5", // Bright magenta
-  "#00E5FF", // Vivid cyan
-  "#FFEA00", // Electric yellow
-  "#FF6A00", // Vivid orange
-  "#FF1493", // Hot pink
+  "#D6521F", // Burnt Sienna
+  "#4F8AA3", // Dusk Blue
+  "#5F9755", // Moss Green
+  "#C58F3B", // Amber Ochre
+  "#7A5BA6", // Iris Purple
+  "#B84A6C", // Dusty Rose
 ];
 
 export function ImageCanvas({
   sessionId,
   src,
   label,
+  headerSlot,
   placeholder,
   className,
   controls = true,
@@ -72,7 +79,7 @@ export function ImageCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const transform = useViewport((s) => s.transforms[sessionId] ?? { scale: 1, tx: 0, ty: 0 });
-  const zoomBy = useViewport((s) => s.zoomBy);
+  const zoomAt = useViewport((s) => s.zoomAt);
   const panBy = useViewport((s) => s.panBy);
   const setTransform = useViewport((s) => s.set);
   const reset = useViewport((s) => s.reset);
@@ -84,6 +91,7 @@ export function ImageCanvas({
     x0: number; y0: number; x1: number; y1: number;
   }>(null);
   const [hoverDrop, setHoverDrop] = useState(false);
+  const [hoverPx, setHoverPx] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -109,9 +117,14 @@ export function ImageCanvas({
     }
   }, []);
 
-  // ------------------------- Interaction -------------------------
+  // Clear natural size when src changes so a new image reloads cleanly.
+  useEffect(() => {
+    setNatural(null);
+    setHoverPx(null);
+  }, [src]);
 
-  const onWheel = useCallback(
+  // --- Zoom -----------------------------------------------------------
+  const wheelZoom = useCallback(
     (e: React.WheelEvent) => {
       e.preventDefault();
       const rect = containerRef.current?.getBoundingClientRect();
@@ -119,9 +132,9 @@ export function ImageCanvas({
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
       const factor = Math.pow(1.0015, -e.deltaY);
-      zoomBy(sessionId, factor, cx, cy);
+      zoomAt(sessionId, factor, cx, cy, rect.width, rect.height);
     },
-    [sessionId, zoomBy],
+    [sessionId, zoomAt],
   );
 
   useEffect(() => {
@@ -132,10 +145,17 @@ export function ImageCanvas({
     return () => el.removeEventListener("wheel", h);
   }, []);
 
-  // Suppress the native context menu so right-click is ours.
-  const onContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-  }, []);
+  const zoomCenter = useCallback(
+    (factor: number) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      zoomAt(sessionId, factor, rect.width / 2, rect.height / 2, rect.width, rect.height);
+    },
+    [sessionId, zoomAt],
+  );
+
+  // --- Pointer (pan + right-click draw) ------------------------------
+  const suppressContext = useCallback((e: React.MouseEvent) => e.preventDefault(), []);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -144,8 +164,6 @@ export function ImageCanvas({
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
 
-      // Right-click starts a new bounding box, but only if the press
-      // begins inside the image's rendered area.
       if (e.button === 2 && drawable && box) {
         if (px >= box.x && px <= box.x + box.w && py >= box.y && py <= box.y + box.h) {
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -164,19 +182,28 @@ export function ImageCanvas({
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (drawRect) {
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        setDrawRect({
-          ...drawRect,
-          x1: e.clientX - rect.left,
-          y1: e.clientY - rect.top,
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+
+      if (natural && box && px >= box.x && px <= box.x + box.w && py >= box.y && py <= box.y + box.h) {
+        const norm = paneToNormalized(px, py, box);
+        setHoverPx({
+          x: Math.max(0, Math.min(natural.w - 1, Math.floor(norm.x * natural.w))),
+          y: Math.max(0, Math.min(natural.h - 1, Math.floor(norm.y * natural.h))),
         });
+      } else if (hoverPx) {
+        setHoverPx(null);
+      }
+
+      if (drawRect) {
+        setDrawRect({ ...drawRect, x1: px, y1: py });
         return;
       }
       if (dragging) panBy(sessionId, e.movementX, e.movementY);
     },
-    [dragging, drawRect, panBy, sessionId],
+    [box, dragging, drawRect, hoverPx, natural, panBy, sessionId],
   );
 
   const onPointerUp = useCallback(
@@ -210,9 +237,10 @@ export function ImageCanvas({
     [box, drawColor, drawRect, onDrawBox],
   );
 
+  const onPointerLeave = useCallback(() => setHoverPx(null), []);
   const onDoubleClick = useCallback(() => reset(sessionId), [reset, sessionId]);
 
-  // ------------------------- Drag-and-drop -------------------------
+  // --- Drag-and-drop --------------------------------------------------
   const onHtmlDragOver = useCallback(
     (e: React.DragEvent) => {
       if (!onDropPath) return;
@@ -236,7 +264,7 @@ export function ImageCanvas({
     [onDropPath],
   );
 
-  // ------------------------- Save with boxes -------------------------
+  // --- Save -----------------------------------------------------------
   const handleSave = useCallback(async () => {
     if (!src || !natural || !onSave) return;
     const image = new window.Image();
@@ -267,13 +295,7 @@ export function ImageCanvas({
     }, "image/png");
   }, [boxes, natural, onSave, saveFilenameBase, src]);
 
-  // ------------------------- Zoom buttons -------------------------
-  const zoomCenter = useCallback(
-    (factor: number) => zoomBy(sessionId, factor, cont.w / 2, cont.h / 2),
-    [cont.h, cont.w, sessionId, zoomBy],
-  );
-
-  // ------------------------- Scrollbars -------------------------
+  // --- Scrollbars -----------------------------------------------------
   const hasHScroll = !!box && box.w > cont.w + 0.5;
   const hasVScroll = !!box && box.h > cont.h + 0.5;
 
@@ -287,14 +309,14 @@ export function ImageCanvas({
       if (!hasHScroll || !box || !natural) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const frac = clamp((e.clientX - rect.left) / rect.width, 0, 1);
-      const extraX = box.w - cont.w;
-      const targetX = -frac * extraX;
+      const extra = box.w - cont.w;
+      const targetLeft = -frac * extra;
       const base = fitScale(natural.w, natural.h, cont.w, cont.h);
       const scale = base * transform.scale;
-      const tx = targetX - (cont.w - scale * natural.w) / 2;
+      const tx = targetLeft - (cont.w - scale * natural.w) / 2;
       setTransform(sessionId, { ...transform, tx });
     },
-    [box, cont.h, cont.w, hasHScroll, natural, sessionId, setTransform, transform],
+    [box, cont.w, hasHScroll, natural, sessionId, setTransform, transform],
   );
 
   const onVScrollClick = useCallback(
@@ -302,17 +324,16 @@ export function ImageCanvas({
       if (!hasVScroll || !box || !natural) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const frac = clamp((e.clientY - rect.top) / rect.height, 0, 1);
-      const extraY = box.h - cont.h;
-      const targetY = -frac * extraY;
+      const extra = box.h - cont.h;
+      const targetTop = -frac * extra;
       const base = fitScale(natural.w, natural.h, cont.w, cont.h);
       const scale = base * transform.scale;
-      const ty = targetY - (cont.h - scale * natural.h) / 2;
+      const ty = targetTop - (cont.h - scale * natural.h) / 2;
       setTransform(sessionId, { ...transform, ty });
     },
     [box, cont.h, cont.w, hasVScroll, natural, sessionId, setTransform, transform],
   );
 
-  // ------------------------- Render -------------------------
   const imgStyle = box
     ? {
         transform: `translate(${box.x}px, ${box.y}px)`,
@@ -325,12 +346,13 @@ export function ImageCanvas({
   return (
     <div
       ref={containerRef}
-      onWheel={onWheel}
-      onContextMenu={onContextMenu}
+      onWheel={wheelZoom}
+      onContextMenu={suppressContext}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onPointerLeave={onPointerLeave}
       onDoubleClick={onDoubleClick}
       onDragOver={onHtmlDragOver}
       onDragLeave={onHtmlDragLeave}
@@ -347,9 +369,13 @@ export function ImageCanvas({
           : "Left-click-drag to pan · wheel to zoom · double-click to reset · drag-and-drop to load"
       }
     >
-      <div className="absolute top-2 left-2 z-20 px-2 py-0.5 text-[11px] font-medium text-text-muted bg-surface/80 backdrop-blur rounded border border-surface-border pointer-events-none">
-        {label}
-      </div>
+      {headerSlot ? (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">{headerSlot}</div>
+      ) : label ? (
+        <div className="absolute top-2 left-2 z-20 px-2 py-0.5 text-[11px] font-medium text-text-muted bg-surface/80 backdrop-blur rounded border border-surface-border pointer-events-none">
+          {label}
+        </div>
+      ) : null}
 
       {controls && src && (
         <>
@@ -357,7 +383,7 @@ export function ImageCanvas({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); reset(sessionId); }}
-              className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center"
+              className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center transition-colors"
               title="Reset to fit"
             >
               <Maximize2 size={12} />
@@ -366,8 +392,8 @@ export function ImageCanvas({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); void handleSave(); }}
-                className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center"
-                title="Save image (with annotations baked in)"
+                className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center transition-colors"
+                title="Save copy (with annotations baked in)"
               >
                 <Save size={12} />
               </button>
@@ -378,7 +404,7 @@ export function ImageCanvas({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); zoomCenter(1.25); }}
-              className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center"
+              className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center transition-colors"
               title="Zoom in"
             >
               <Plus size={13} />
@@ -389,7 +415,7 @@ export function ImageCanvas({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); zoomCenter(1 / 1.25); }}
-              className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center"
+              className="w-7 h-7 rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted hover:text-text hover:bg-surface-raised flex items-center justify-center transition-colors"
               title="Zoom out"
             >
               <Minus size={13} />
@@ -398,11 +424,17 @@ export function ImageCanvas({
         </>
       )}
 
+      {hoverPx && natural && (
+        <div className="absolute bottom-2 left-2 z-20 px-2 py-0.5 text-[10px] font-mono tabular-nums rounded border border-surface-border bg-surface/80 backdrop-blur text-text-muted pointer-events-none">
+          {hoverPx.x}, {hoverPx.y} px · {natural.w}×{natural.h}
+        </div>
+      )}
+
       {src ? (
         <img
           ref={imgRef}
           src={src}
-          alt={label}
+          alt={label ?? ""}
           draggable={false}
           onLoad={onImgLoad}
           className="absolute top-0 left-0 pointer-events-none"
@@ -525,8 +557,10 @@ export function ColorPalette({
           type="button"
           onClick={() => onChange(c)}
           className={cn(
-            "w-5 h-5 rounded border",
-            value === c ? "border-text ring-2 ring-text/40" : "border-surface-border",
+            "w-5 h-5 rounded border transition-transform",
+            value === c
+              ? "border-text ring-2 ring-text/30 scale-110"
+              : "border-surface-border hover:scale-105",
           )}
           style={{ backgroundColor: c }}
           title={c}
@@ -551,7 +585,7 @@ export function ClearAnnotationsButton({
       onClick={onClick}
       disabled={count === 0}
       className={cn(
-        "flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface-raised disabled:opacity-40 disabled:cursor-not-allowed",
+        "flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface-raised disabled:opacity-40 disabled:cursor-not-allowed transition-colors",
         className,
       )}
       title={count === 0 ? "No annotations" : `Clear ${count} annotation${count === 1 ? "" : "s"}`}

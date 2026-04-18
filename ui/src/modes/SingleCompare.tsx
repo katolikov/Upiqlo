@@ -17,10 +17,10 @@ import {
 } from "@/components/ImageCanvas";
 import { LayerDropdown } from "@/components/LayerDropdown";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
-import { ProgressBar } from "@/components/ProgressBar";
 import { SessionConfigBar } from "@/components/SessionConfigBar";
 import { SessionHeader } from "@/components/SessionHeader";
 import { UnifiedToggles } from "@/components/UnifiedToggles";
+import { toast } from "@/state/toast";
 import {
   useSessions,
   type BoundingBox,
@@ -36,11 +36,10 @@ const DEFAULT_TOGGLES: UnifiedArtifact[] = UNIFIED_LAYERS.map((l) => l.key);
 /**
  * Single-image comparison mode. Layout:
  *
- *   [ config bar ............................................ ]
- *   [ A path input ............  middle  ........ B path input ]
- *   [ action bar: color | clear | Compare / Cancel .............. ]
- *   [ A canvas   |   Output canvas   |   B canvas               ]
- *   [ metrics dashboard ...................................... ]
+ *   [ config bar .................... | Run / Cancel ]
+ *   [ Left path | annotation tools | Right path     ]
+ *   [ Left pane | Output pane (hdr+legend) | Right  ]
+ *   [ metrics dashboard (progress when running)     ]
  */
 export function SingleCompareMode({ session }: Props) {
   const setSinglePaths = useSessions((s) => s.setSinglePaths);
@@ -60,7 +59,6 @@ export function SingleCompareMode({ session }: Props) {
   const [unifiedComposite, setUnifiedComposite] = useState<string | null>(null);
   const [unifiedBuilding, setUnifiedBuilding] = useState(false);
 
-  // Stream handle so the Cancel button and unmount cleanup can tear down.
   const streamRef = useRef<{ cancel: () => Promise<void> } | null>(null);
   useEffect(() => {
     return () => {
@@ -70,7 +68,6 @@ export function SingleCompareMode({ session }: Props) {
     };
   }, []);
 
-  // Resolve A/B abs paths to webview-friendly URLs.
   useEffect(() => {
     let cancelled = false;
     Promise.all([resolveImageSrc(session.referencePath), resolveImageSrc(session.targetPath)])
@@ -84,7 +81,6 @@ export function SingleCompareMode({ session }: Props) {
     };
   }, [session.referencePath, session.targetPath]);
 
-  // OS drag-drop via Tauri → load into A first, then B.
   useEffect(() => {
     const off = onTauriFileDrop((paths) => {
       if (paths.length === 0) return;
@@ -164,6 +160,7 @@ export function SingleCompareMode({ session }: Props) {
             break;
           case "error":
             setSingleStatus(session.id, { kind: "error", message: evt.message });
+            toast("error", `Run failed: ${evt.message}`);
             streamRef.current = null;
             break;
         }
@@ -187,7 +184,6 @@ export function SingleCompareMode({ session }: Props) {
     [report],
   );
 
-  // --- Unified canvas composite: rebuild when toggles or heatmaps change ---
   const toggledKey = useMemo(
     () => [...unifiedToggled].sort().join("|"),
     [unifiedToggled],
@@ -216,17 +212,11 @@ export function SingleCompareMode({ session }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.layer, report, tgtSrc, toggledKey]);
 
-  // Reset toggles when the session's available layers change — keep only
-  // ones present in the new report.
   useEffect(() => {
     if (!report) return;
     setUnifiedToggled((prev) => {
       const keep = new Set<string>();
       for (const k of prev) if (available.has(k)) keep.add(k);
-      for (const spec of UNIFIED_LAYERS) {
-        if (available.has(spec.key) && keep.size === 0) keep.add(spec.key);
-      }
-      // If nothing kept (first render after a run), default to everything.
       if (keep.size === 0) {
         for (const spec of UNIFIED_LAYERS) if (available.has(spec.key)) keep.add(spec.key);
       }
@@ -234,7 +224,6 @@ export function SingleCompareMode({ session }: Props) {
     });
   }, [available, report]);
 
-  // Resolve the middle-pane image source.
   let middleSrc: string | null = null;
   if (session.layer === "diagnostic_overlay.png") {
     middleSrc = unifiedComposite;
@@ -251,7 +240,7 @@ export function SingleCompareMode({ session }: Props) {
       : session.status.kind === "error"
         ? `Error: ${session.status.message}`
         : session.status.kind === "cancelled"
-          ? "Comparison cancelled. Click Compare to retry."
+          ? "Comparison cancelled. Click Run to retry."
           : session.layer === "diagnostic_overlay.png" && report && unifiedBuilding
             ? "Compositing unified view…"
             : "Run a comparison to see heatmaps";
@@ -273,6 +262,7 @@ export function SingleCompareMode({ session }: Props) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    toast("success", `Saved ${filename}`);
   }, []);
 
   const toggleLayer = useCallback((key: UnifiedArtifact) => {
@@ -284,12 +274,28 @@ export function SingleCompareMode({ session }: Props) {
     });
   }, []);
 
-  // Update the session title on first path commit if the user hasn't
-  // renamed the auto-generated title yet.
   useEffect(() => {
-    // no-op: session title is auto-generated and purposely stable.
     void renameSession;
   }, [renameSession]);
+
+  const runButton = running ? (
+    <button
+      type="button"
+      onClick={cancel}
+      className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20 transition-colors"
+    >
+      <XCircle size={13} /> Cancel
+    </button>
+  ) : (
+    <button
+      type="button"
+      disabled={!canRun}
+      onClick={run}
+      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed transition-colors"
+    >
+      <Play size={13} /> Run
+    </button>
+  );
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -297,45 +303,24 @@ export function SingleCompareMode({ session }: Props) {
         sessionId={session.id}
         params={session.params}
         activePaths={[session.referencePath, session.targetPath]}
+        action={runButton}
       />
 
-      {/* A input on far left, B input on far right, action bar in the middle. */}
       <SessionHeader
         kind="file"
-        leftLabel="A · Reference"
-        rightLabel="B · Target"
+        leftLabel="Left · Reference"
+        rightLabel="Right · Target"
         leftValue={session.referencePath}
         onCommitLeft={onCommitA}
         rightValue={session.targetPath}
         onCommitRight={onCommitB}
         middle={
-          <div className="flex items-center gap-3 px-2 w-full justify-center">
-            {session.status.kind === "running" ? (
-              <ProgressBar status={session.status} />
-            ) : null}
+          <div className="flex items-center gap-3 w-full justify-center">
             <ColorPalette value={drawColor} onChange={setDrawColor} />
             <ClearAnnotationsButton
               count={session.annotations.length}
               onClick={() => clearAnnotations(session.id)}
             />
-            {running ? (
-              <button
-                type="button"
-                onClick={cancel}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20"
-              >
-                <XCircle size={13} /> Cancel
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={!canRun}
-                onClick={run}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed"
-              >
-                <Play size={13} /> Compare
-              </button>
-            )}
           </div>
         }
       />
@@ -345,8 +330,8 @@ export function SingleCompareMode({ session }: Props) {
           <ImageCanvas
             sessionId={session.id}
             src={refSrc}
-            label="A · Reference"
-            placeholder="Paste an A path above, drag an image here, or click the folder icon"
+            label="Left · Reference"
+            placeholder="Paste a path above, drag an image here, or click the folder icon"
             boxes={session.annotations}
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
@@ -356,26 +341,16 @@ export function SingleCompareMode({ session }: Props) {
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border relative">
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 max-w-[92%]">
-            <LayerDropdown
-              value={session.layer}
-              onChange={(l) => setLayer(session.id, l)}
-              available={available}
-            />
-            {session.layer === "diagnostic_overlay.png" && report && (
-              <div className="px-2 py-1.5 rounded-md bg-surface-raised/90 backdrop-blur border border-surface-border">
-                <UnifiedToggles
-                  enabled={unifiedToggled}
-                  onToggle={toggleLayer}
-                  available={available}
-                />
-              </div>
-            )}
-          </div>
           <ImageCanvas
             sessionId={session.id}
             src={middleSrc}
-            label={`Output · ${labelFor(session.layer)}`}
+            headerSlot={
+              <LayerDropdown
+                value={session.layer}
+                onChange={(l) => setLayer(session.id, l)}
+                available={available}
+              />
+            }
             placeholder={middlePlaceholder}
             drawable
             drawColor={drawColor}
@@ -385,14 +360,24 @@ export function SingleCompareMode({ session }: Props) {
             onSave={onSaveImage}
             saveFilenameBase={`${labelFor(session.layer)}-annotated`}
           />
+          {session.layer === "diagnostic_overlay.png" && report && (
+            <div className="absolute top-12 left-2 z-10 pointer-events-auto">
+              <UnifiedToggles
+                enabled={unifiedToggled}
+                onToggle={toggleLayer}
+                available={available}
+                orientation="vertical"
+              />
+            </div>
+          )}
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col">
           <ImageCanvas
             sessionId={session.id}
             src={tgtSrc}
-            label="B · Target"
-            placeholder="Paste a B path above, drag an image here, or click the folder icon"
+            label="Right · Target"
+            placeholder="Paste a path above, drag an image here, or click the folder icon"
             boxes={session.annotations}
             onDeleteBox={onDeleteBox}
             onSave={onSaveImage}
@@ -402,7 +387,11 @@ export function SingleCompareMode({ session }: Props) {
         </div>
       </div>
 
-      <MetricsDashboard report={report} status={session.status.kind} />
+      <MetricsDashboard
+        report={report}
+        status={session.status.kind}
+        runningStatus={session.status.kind === "running" ? session.status : undefined}
+      />
     </div>
   );
 }

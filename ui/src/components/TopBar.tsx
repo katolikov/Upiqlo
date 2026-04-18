@@ -5,6 +5,7 @@ import {
   Download,
   FolderPlus,
   ImagePlus,
+  Settings as SettingsIcon,
   Upload,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -17,6 +18,8 @@ import {
   pickUpiqloFile,
 } from "@/lib/session-io";
 import { useSessions } from "@/state/sessions";
+import { toast } from "@/state/toast";
+import { SettingsModal } from "./SettingsModal";
 
 type EngineStatus =
   | { kind: "loading" }
@@ -24,14 +27,13 @@ type EngineStatus =
   | { kind: "error"; message: string };
 
 /**
- * The global top bar. Stays compact: brand, quick-new-session icons,
- * save/open for the active session, and the engine status chip.
- *
- * Per-session parameters live INSIDE each session's workspace now
- * (see SessionConfigBar).
+ * Top bar: brand + quick-new-session icons + save/open + engine status
+ * + settings gear. Per-session parameters live inside the session
+ * workspace (SessionConfigBar).
  */
 export function TopBar() {
   const [engine, setEngine] = useState<EngineStatus>({ kind: "loading" });
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const openSession = useSessions((s) => s.openSession);
   const hydrateSession = useSessions((s) => s.hydrateSession);
   const activeSession = useSessions((s) => {
@@ -66,8 +68,9 @@ export function TopBar() {
       try {
         const sess = importSession(doc);
         hydrateSession(sess);
+        toast("success", `Loaded session "${sess.title}"`);
       } catch (e) {
-        alert(`Import failed: ${(e as Error).message}`);
+        toast("error", `Import failed: ${(e as Error).message}`);
       }
     }
   };
@@ -78,53 +81,65 @@ export function TopBar() {
       exportSession(activeSession),
       activeSession.title.replace(/\s+/g, "_"),
     );
+    toast("success", `Saved "${activeSession.title}.upiqlo"`);
   };
 
   return (
-    <header className="h-11 border-b border-surface-border flex items-center px-3 gap-2 bg-surface-raised shrink-0">
-      <div className="w-7 h-7 rounded-md bg-accent/20 border border-accent/40 flex items-center justify-center">
-        <Activity size={16} className="text-accent" />
-      </div>
-      <div className="flex items-baseline gap-2">
-        <h1 className="text-sm font-semibold tracking-wide">Upiqlo</h1>
-        <span className="text-[11px] text-text-faint">FR-IQA Image Comparison</span>
-      </div>
+    <>
+      <header className="h-11 border-b border-surface-border flex items-center px-3 gap-2 bg-surface-raised shrink-0">
+        <div className="w-7 h-7 rounded-md bg-accent/20 border border-accent/40 flex items-center justify-center">
+          <Activity size={16} className="text-accent" />
+        </div>
+        <div className="flex items-baseline gap-2">
+          <h1 className="text-sm font-semibold tracking-wide">Upiqlo</h1>
+          <span className="text-[11px] text-text-faint">FR-IQA Image Comparison</span>
+        </div>
 
-      <div className="h-5 w-px bg-surface-border mx-1" />
+        <div className="h-5 w-px bg-surface-border mx-1" />
 
-      {/* Compact new-session icons — always visible at the top level. */}
-      <IconButton
-        onClick={() => openSession("single")}
-        label="New file comparison"
-        icon={<ImagePlus size={14} />}
-      />
-      <IconButton
-        onClick={() => openSession("folder")}
-        label="New folder comparison"
-        icon={<FolderPlus size={14} />}
-      />
+        <IconButton
+          onClick={() => openSession("single")}
+          label="New file comparison"
+          icon={<ImagePlus size={14} />}
+        />
+        <IconButton
+          onClick={() => openSession("folder")}
+          label="New folder comparison"
+          icon={<FolderPlus size={14} />}
+        />
 
-      <div className="h-5 w-px bg-surface-border mx-1" />
+        <div className="h-5 w-px bg-surface-border mx-1" />
 
-      <IconButton
-        onClick={onImport}
-        label="Open session (.upiqlo)"
-        icon={<Upload size={14} />}
-      />
-      <IconButton
-        onClick={onExport}
-        label={activeSession ? "Save session (.upiqlo)" : "No active session to save"}
-        disabled={!activeSession}
-        icon={<Download size={14} />}
-      />
+        <IconButton
+          onClick={onImport}
+          label="Open session (.upiqlo)"
+          icon={<Upload size={14} />}
+        />
+        <IconButton
+          onClick={onExport}
+          label={activeSession ? "Save session (.upiqlo)" : "No active session to save"}
+          disabled={!activeSession}
+          icon={<Download size={14} />}
+        />
 
-      <div className="flex-1" />
+        <div className="flex-1" />
 
-      {!hasSessions && (
-        <span className="text-[11px] text-text-faint mr-2">No session open</span>
-      )}
-      <EngineChip status={engine} />
-    </header>
+        {!hasSessions && (
+          <span className="text-[11px] text-text-faint mr-2">No session open</span>
+        )}
+        <EngineChip status={engine} />
+
+        <div className="h-5 w-px bg-surface-border mx-1" />
+
+        <IconButton
+          onClick={() => setSettingsOpen(true)}
+          label="Settings"
+          icon={<SettingsIcon size={14} />}
+        />
+      </header>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    </>
   );
 }
 
@@ -145,7 +160,7 @@ function IconButton({
       onClick={onClick}
       disabled={disabled}
       title={label}
-      className="w-7 h-7 flex items-center justify-center rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+      className="w-7 h-7 flex items-center justify-center rounded border border-surface-border text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
     >
       {icon}
     </button>

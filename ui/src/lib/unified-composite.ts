@@ -1,19 +1,12 @@
 /**
  * Render the "Unified" artifact-highlight view on the frontend.
  *
- * Algorithm
- * ---------
- * 1. Load the target image, draw to an offscreen canvas.
- * 2. Convert to grayscale (Rec.601 luminance).
- * 3. For each ENABLED artifact layer, load its mask PNG, tint with a
- *    vibrant colour, and composite over the grayscale base using the
- *    "screen" blend mode so overlapping artefacts mix rather than
- *    overwrite.
- * 4. Return a PNG data URL ready to feed into an <img src>.
+ * The base image is rendered 100% untinted in grayscale. Only pixels
+ * that the backend identifies as artefacts above a configurable floor
+ * pick up colour — regions with no detected artefact stay pure gray.
  *
- * This is a pure frontend operation — toggling a layer on/off does NOT
- * re-run the heavy ML algorithm. The backend supplies the individual
- * mask PNGs once per comparison; the browser does the compositing.
+ * All layer compositing is done in the browser so toggling a layer on
+ * or off is instantaneous (no heavy algorithm re-run).
  */
 
 import { heatmapDataUrl } from "./api";
@@ -33,16 +26,24 @@ export interface UnifiedLayerSpec {
   color: string;
   /** 0..1 — multiplier applied to the mask's intensity. */
   intensity?: number;
+  /** 0..1 — mask values below this are treated as "no artefact" (zero
+   * alpha), so non-artefact regions stay pure grayscale. Prevents the
+   * low-value tail of the jet colourmap from tinting the whole image. */
+  floor?: number;
 }
 
-/** The seven artefact channels + the accent colour assigned to each. */
+/**
+ * Professional palette: each artefact gets a distinct, comfortably
+ * saturated hue (no neon). Keep in sync with BOX_COLORS in ImageCanvas
+ * where relevant.
+ */
 export const UNIFIED_LAYERS: UnifiedLayerSpec[] = [
-  { key: "global_anomaly_map.png", label: "Anomaly", color: "#FF1493", intensity: 0.95 },
-  { key: "gibbs_ringing_mask.png", label: "Ringing", color: "#00E5FF", intensity: 1.0 },
-  { key: "gaussian_noise_mask.png", label: "Noise", color: "#00FF7F", intensity: 1.0 },
-  { key: "blur_mask.png", label: "Blur", color: "#FFEA00", intensity: 1.0 },
-  { key: "color_degradation_map.png", label: "Color shift", color: "#FF6A00", intensity: 0.85 },
-  { key: "structural_similarity_map.png", label: "Structure", color: "#FF00E5", intensity: 0.7 },
+  { key: "global_anomaly_map.png", label: "Anomaly", color: "#D6521F", intensity: 1.05, floor: 0.3 },
+  { key: "gibbs_ringing_mask.png", label: "Ringing", color: "#4F8AA3", intensity: 1.0, floor: 0.25 },
+  { key: "gaussian_noise_mask.png", label: "Noise", color: "#5F9755", intensity: 1.0, floor: 0.25 },
+  { key: "blur_mask.png", label: "Blur", color: "#C58F3B", intensity: 1.0, floor: 0.3 },
+  { key: "color_degradation_map.png", label: "Color shift", color: "#B84A6C", intensity: 0.9, floor: 0.3 },
+  { key: "structural_similarity_map.png", label: "Structure", color: "#7A5BA6", intensity: 0.8, floor: 0.4 },
 ];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -79,23 +80,25 @@ function paintGrayscale(
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const h = hex.replace("#", "");
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return { r, g, b };
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
 }
 
 /**
- * Tint a mask image with a colour and write the result to `out` using
- * the mask's brightness as the alpha channel. This avoids depending on
- * globalCompositeOperation = 'source-in' which behaves inconsistently
- * across some Tauri webviews.
+ * Paint a mask layer tinted with `color`. Pixels whose mask brightness is
+ * below `floor` contribute alpha = 0, keeping the grayscale base visible
+ * in those regions. Everything above the floor is rescaled to [0, 255]
+ * and scaled by `intensity`.
  */
 function paintTintedMask(
   out: CanvasRenderingContext2D,
   mask: HTMLImageElement,
   color: { r: number; g: number; b: number },
   intensity: number,
+  floor: number,
   width: number,
   height: number,
 ) {
@@ -107,16 +110,18 @@ function paintTintedMask(
   bctx.drawImage(mask, 0, 0, width, height);
   const img = bctx.getImageData(0, 0, width, height);
   const data = img.data;
+  const denom = Math.max(1 / 255, 1 - floor);
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    // Brightness-weighted signal (Rec.601) combined with the max-channel —
-    // jet colormaps have bright reds/blues that matter even when luminance
-    // is low.
-    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    const peak = Math.max(r, g, b);
-    const alpha = Math.min(255, Math.max(lum, peak) * intensity);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    const peak = Math.max(r, g, b) / 255;
+    const raw = Math.max(lum, peak); // 0..1
+    // Below-floor → zero alpha (no tint applied). Above-floor → linearly
+    // rescaled to [0, 1] then * intensity * 255 → alpha.
+    const above = Math.max(0, raw - floor) / denom;
+    const alpha = Math.min(255, above * intensity * 255);
     data[i] = color.r;
     data[i + 1] = color.g;
     data[i + 2] = color.b;
@@ -128,12 +133,10 @@ function paintTintedMask(
 
 export interface BuildUnifiedArgs {
   targetSrc: string;
-  heatmaps: Record<string, string>; // layer filename → Base64 PNG
+  heatmaps: Record<string, string>;
   enabled: Set<string>;
 }
 
-/** Build the composite PNG data URL. Returns null if the target image
- * can't be loaded (e.g., comparison hasn't run yet). */
 export async function buildUnified({
   targetSrc,
   heatmaps,
@@ -151,10 +154,10 @@ export async function buildUnified({
 
     paintGrayscale(ctx, base, w, h);
 
-    // Overlay each enabled layer using the "screen" blend mode so the
-    // brighter of base-or-tint wins per pixel — vivid artefacts pop
-    // without blowing out unaffected regions.
-    ctx.globalCompositeOperation = "screen";
+    // Stack each enabled mask with alpha-compositing. With the floor +
+    // rescale, non-artefact pixels stay at alpha=0 so the grayscale
+    // base shows through. The "source-over" default blend is sufficient;
+    // later masks sit on top of earlier ones.
     for (const spec of UNIFIED_LAYERS) {
       if (!enabled.has(spec.key)) continue;
       const b64 = heatmaps[spec.key];
@@ -166,14 +169,14 @@ export async function buildUnified({
           mask,
           hexToRgb(spec.color),
           spec.intensity ?? 1.0,
+          spec.floor ?? 0.25,
           w,
           h,
         );
       } catch {
-        // Skip missing / unreadable layers.
+        /* skip unreadable mask */
       }
     }
-    ctx.globalCompositeOperation = "source-over";
 
     return canvas.toDataURL("image/png");
   } catch {

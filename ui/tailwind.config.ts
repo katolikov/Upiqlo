@@ -1,19 +1,21 @@
 import type { Config } from "tailwindcss";
 
 /**
- * Upiqlo palette — extracted verbatim from the FR-IQA-Algo web version
- * (FR-IQA-Algo/web/public/static/css/tokens.css).
+ * Upiqlo palette.
  *
- * Author's own names for the accents:
- *   - Faded Brick      #7A3731  (primary accent, used sparingly)
- *   - Weathered Timber #3E3129  (hover / selected surfaces)
- *   - Cold Concrete    #8C9295  (muted text)
- *   - Oxidized Iron    #5E3A23  (secondary accent, hot side)
- *   - Barren Earth     #635B4C  (neutral drab fill)
+ * All colour tokens are backed by CSS custom properties declared in
+ * `src/index.css`. That lets the Settings Modal flip the active theme
+ * (Light / Dark / System) by toggling a class on <html> — the same
+ * Tailwind utility classes (`bg-surface`, `text-text-muted`, …) keep
+ * working unchanged.
  *
- * Surfaces are warm near-black (#1a1612 → #3E3129) rather than cool blue,
- * giving the app the same muted/earthy feel as the upstream web viewer.
+ * Source palette: FR-IQA-Algo/web/public/static/css/tokens.css.
  */
+
+function v(name: string) {
+  return `rgb(var(${name}) / <alpha-value>)`;
+}
+
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   darkMode: "class",
@@ -21,32 +23,31 @@ export default {
     extend: {
       colors: {
         surface: {
-          DEFAULT: "#1a1612", // page background (warm near-black)
-          raised: "#221c17", // card / panel
-          sunken: "#08090c", // deepest background — matches <meta theme-color>
-          nested: "#2d261f", // inner surfaces (inputs, sub-panes)
-          hover: "#3E3129", // hover / selected — Weathered Timber
-          border: "#322a23", // hairline
-          "border-strong": "#4a3d33", // hairline-strong
+          DEFAULT: v("--u-surface"),
+          raised: v("--u-surface-raised"),
+          sunken: v("--u-surface-sunken"),
+          nested: v("--u-surface-nested"),
+          hover: v("--u-surface-hover"),
+          border: v("--u-surface-border"),
+          "border-strong": v("--u-surface-border-strong"),
         },
         accent: {
-          DEFAULT: "#7A3731", // Faded Brick
-          hot: "#5E3A23", // Oxidized Iron
+          DEFAULT: v("--u-accent"),
+          hot: v("--u-accent-hot"),
           soft: "rgba(122, 55, 49, 0.14)",
           ring: "rgba(122, 55, 49, 0.35)",
-          contrast: "#f7f2e8",
+          contrast: v("--u-accent-contrast"),
         },
         text: {
-          DEFAULT: "#ede6d9", // warm near-white
-          muted: "#b8b0a3", // secondary
-          faint: "#8C9295", // Cold Concrete
-          dim: "#635B4C", // Barren Earth
+          DEFAULT: v("--u-text"),
+          muted: v("--u-text-muted"),
+          faint: v("--u-text-faint"),
+          dim: v("--u-text-dim"),
         },
-        // Semantic state colors, lifted verbatim from tokens.css.
         signal: {
-          success: "#7f8f5e",
-          warning: "#b08953",
-          danger: "#7A3731",
+          success: v("--u-signal-success"),
+          warning: v("--u-signal-warning"),
+          danger: v("--u-signal-danger"),
         },
       },
       fontFamily: {
@@ -67,6 +68,35 @@ export default {
           "Consolas",
           "monospace",
         ],
+      },
+      keyframes: {
+        "fade-in": {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        "modal-in": {
+          "0%": { opacity: "0", transform: "translateY(8px) scale(0.98)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
+        "toast-in": {
+          "0%": { opacity: "0", transform: "translateX(20px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        "tab-in": {
+          "0%": { opacity: "0", transform: "translateY(2px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        "dropdown-in": {
+          "0%": { opacity: "0", transform: "translateY(-4px) scaleY(0.96)" },
+          "100%": { opacity: "1", transform: "translateY(0) scaleY(1)" },
+        },
+      },
+      animation: {
+        "fade-in": "fade-in 120ms ease-out",
+        "modal-in": "modal-in 180ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "toast-in": "toast-in 220ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "tab-in": "tab-in 140ms ease-out",
+        "dropdown-in": "dropdown-in 120ms cubic-bezier(0.22, 1, 0.36, 1)",
       },
     },
   },

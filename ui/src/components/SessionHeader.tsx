@@ -30,39 +30,43 @@ export function SessionHeader({
   return (
     <div
       className={cn(
-        "h-11 border-b border-surface-border bg-surface flex items-stretch gap-2 px-2 shrink-0",
+        "h-11 border-b border-surface-border bg-surface flex items-stretch gap-0 shrink-0",
         className,
       )}
     >
-      <PathInput
-        label={leftLabel}
-        value={leftValue}
-        onCommit={onCommitLeft}
-        kind={kind}
-        className="w-[320px] shrink-0 self-center"
-        pickerTitle={
-          kind === "file"
-            ? `Select reference image (${leftLabel})`
-            : `Select reference folder (${leftLabel})`
-        }
-      />
+      <div className="flex-1 min-w-0 flex items-center px-2 border-r border-surface-border">
+        <PathInput
+          label={leftLabel}
+          value={leftValue}
+          onCommit={onCommitLeft}
+          kind={kind}
+          className="w-full"
+          pickerTitle={
+            kind === "file"
+              ? `Select reference image (${leftLabel})`
+              : `Select reference folder (${leftLabel})`
+          }
+        />
+      </div>
 
-      <div className="flex-1 flex items-center justify-center min-w-0">
+      <div className="flex-1 min-w-0 flex items-center justify-center px-2 border-r border-surface-border">
         {middle}
       </div>
 
-      <PathInput
-        label={rightLabel}
-        value={rightValue}
-        onCommit={onCommitRight}
-        kind={kind}
-        className="w-[320px] shrink-0 self-center"
-        pickerTitle={
-          kind === "file"
-            ? `Select target image (${rightLabel})`
-            : `Select target folder (${rightLabel})`
-        }
-      />
+      <div className="flex-1 min-w-0 flex items-center px-2">
+        <PathInput
+          label={rightLabel}
+          value={rightValue}
+          onCommit={onCommitRight}
+          kind={kind}
+          className="w-full"
+          pickerTitle={
+            kind === "file"
+              ? `Select target image (${rightLabel})`
+              : `Select target folder (${rightLabel})`
+          }
+        />
+      </div>
     </div>
   );
 }

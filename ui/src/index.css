@@ -2,19 +2,68 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------
+   Theme tokens — consumed by tailwind.config.ts via rgb(var(...) / <a>).
+   "Dark" is the warm earthy base palette from FR-IQA-Algo. "Light" is
+   the parchment-neutral light-mode variant from the same tokens file.
+   ------------------------------------------------------------------ */
 @layer base {
+  :root,
+  :root.dark {
+    --u-surface: 26 22 18;
+    --u-surface-raised: 34 28 23;
+    --u-surface-sunken: 8 9 12;
+    --u-surface-nested: 45 38 31;
+    --u-surface-hover: 62 49 41;
+    --u-surface-border: 50 42 35;
+    --u-surface-border-strong: 74 61 51;
+    --u-accent: 122 55 49;
+    --u-accent-hot: 94 58 35;
+    --u-accent-contrast: 247 242 232;
+    --u-text: 237 230 217;
+    --u-text-muted: 184 176 163;
+    --u-text-faint: 140 146 149;
+    --u-text-dim: 99 91 76;
+    --u-signal-success: 127 143 94;
+    --u-signal-warning: 176 137 83;
+    --u-signal-danger: 122 55 49;
+  }
+
+  :root.light {
+    --u-surface: 243 239 232;
+    --u-surface-raised: 255 255 255;
+    --u-surface-sunken: 235 229 216;
+    --u-surface-nested: 248 244 235;
+    --u-surface-hover: 217 210 194;
+    --u-surface-border: 200 192 179;
+    --u-surface-border-strong: 170 161 148;
+    --u-accent: 122 55 49;
+    --u-accent-hot: 94 58 35;
+    --u-accent-contrast: 26 22 18;
+    --u-text: 26 22 18;
+    --u-text-muted: 62 49 41;
+    --u-text-faint: 99 91 76;
+    --u-text-dim: 140 146 149;
+    --u-signal-success: 100 121 70;
+    --u-signal-warning: 176 137 83;
+    --u-signal-danger: 122 55 49;
+  }
+
   html,
   body,
   #root {
     height: 100%;
   }
 
-  :root {
-    color-scheme: dark;
-  }
-
   body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  :root {
+    color-scheme: dark;
+  }
+  :root.light {
+    color-scheme: light;
   }
 }

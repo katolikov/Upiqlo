@@ -1,9 +1,14 @@
 import { cn } from "@/lib/utils";
 import type { CompareReport } from "@/types/report";
+import type { CompareStatus } from "@/state/sessions";
+import { ProgressBar } from "./ProgressBar";
 
 interface Props {
   report: CompareReport | null;
-  status: "idle" | "running" | "ok" | "error" | "cancelled";
+  status: CompareStatus["kind"];
+  /** When the session is "running", pass its live status so the progress
+   * bar can render inside this dashboard (replacing its empty state). */
+  runningStatus?: Extract<CompareStatus, { kind: "running" }>;
 }
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -14,17 +19,28 @@ const SEVERITY_LABELS: Record<string, string> = {
   blur: "Blur",
 };
 
-export function MetricsDashboard({ report, status }: Props) {
+/**
+ * Bottom results panel. During a live run it hosts the smooth progress
+ * bar; after completion it renders score + dominant artifact + severity
+ * bars + resolution.
+ */
+export function MetricsDashboard({ report, status, runningStatus }: Props) {
+  if (status === "running" && runningStatus) {
+    return (
+      <div className="h-28 border-t border-surface-border bg-surface-raised flex items-center px-6">
+        <ProgressBar status={runningStatus} />
+      </div>
+    );
+  }
+
   if (!report) {
     return (
       <div className="h-28 border-t border-surface-border bg-surface-raised flex items-center justify-center text-xs text-text-faint">
-        {status === "running"
-          ? "Computing score and diagnostics…"
-          : status === "error"
-            ? "Comparison failed — see workspace for details."
-            : status === "cancelled"
-              ? "Comparison cancelled. CPU freed."
-              : "No comparison run yet."}
+        {status === "error"
+          ? "Comparison failed — see workspace for details."
+          : status === "cancelled"
+            ? "Comparison cancelled. CPU freed."
+            : "No comparison run yet."}
       </div>
     );
   }
@@ -33,23 +49,18 @@ export function MetricsDashboard({ report, status }: Props) {
   const score01 = Math.max(0, Math.min(1, report.score));
 
   return (
-    <div className="h-28 border-t border-surface-border bg-surface-raised flex items-stretch">
+    <div className="h-28 border-t border-surface-border bg-surface-raised flex items-stretch animate-fade-in">
       <ScoreBlock score={score01} label={report.score_label} />
       <DominantBlock
         dominant={report.diagnostics.dominant_artifact}
         affected={report.diagnostics.affected_area}
       />
-      {/* Render whichever severity channels the report actually contains.
-          Upstream dropped `blocking` in commit a611d41; older cached
-          results may still carry it so we show it only when present. */}
       <div
         className={`flex-1 grid gap-0 ${
           sev.blocking !== undefined ? "grid-cols-5" : "grid-cols-4"
         }`}
       >
-        {(
-          ["blocking", "ringing", "noise", "color_shift", "blur"] as const
-        )
+        {(["blocking", "ringing", "noise", "color_shift", "blur"] as const)
           .filter((k) => sev[k] !== undefined)
           .map((k) => (
             <SeverityBlock key={k} name={SEVERITY_LABELS[k]} value={sev[k]!} />
@@ -64,9 +75,6 @@ export function MetricsDashboard({ report, status }: Props) {
 }
 
 function ScoreBlock({ score, label }: { score: number; label: string }) {
-  // Score tier colours mapped to upstream's muted state palette so the
-  // look stays consistent with the FR-IQA-Algo web viewer. Lower quality
-  // warms up through brick/brown rather than going full red.
   const color =
     score >= 0.9
       ? "text-signal-success"
@@ -101,8 +109,6 @@ function DominantBlock({ dominant, affected }: { dominant: string; affected: num
 }
 
 function SeverityBlock({ name, value }: { name: string; value: number }) {
-  // 0..100 scale, clamp for bar. Bar colour uses the upstream signal
-  // palette so severity readouts match the web viewer's look.
   const clamped = Math.max(0, Math.min(100, value));
   const bar =
     clamped >= 70
@@ -119,7 +125,10 @@ function SeverityBlock({ name, value }: { name: string; value: number }) {
         {value.toFixed(1)}
       </div>
       <div className="h-1.5 mt-2 bg-surface-sunken rounded-full overflow-hidden">
-        <div className={cn("h-full rounded-full", bar)} style={{ width: `${clamped}%` }} />
+        <div
+          className={cn("h-full rounded-full transition-[width] duration-500 ease-out", bar)}
+          style={{ width: `${clamped}%` }}
+        />
       </div>
     </div>
   );

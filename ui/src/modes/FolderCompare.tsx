@@ -16,11 +16,11 @@ import {
 } from "@/components/ImageCanvas";
 import { LayerDropdown } from "@/components/LayerDropdown";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
-import { ProgressBar } from "@/components/ProgressBar";
 import { SessionConfigBar } from "@/components/SessionConfigBar";
 import { SessionHeader } from "@/components/SessionHeader";
 import { UnifiedToggles } from "@/components/UnifiedToggles";
 import { cn } from "@/lib/utils";
+import { toast } from "@/state/toast";
 import {
   folderPairKey,
   useSessions,
@@ -38,15 +38,10 @@ const DEFAULT_TOGGLES: UnifiedArtifact[] = UNIFIED_LAYERS.map((l) => l.key);
 /**
  * Folder comparison mode. Layout:
  *
- *   [ config bar ....................................................... ]
- *   [ A dir input .........  action bar  ....................... B dir input ]
- *   [ A explorer | A canvas | Output | B canvas | B explorer           ]
- *   [ metrics dashboard ............................................... ]
- *
- * Each explorer is an independent list of files in its directory. The
- * user picks a file in each explorer — the two selections drive the
- * current comparison pair. Selecting the same folder on both sides is
- * fully supported; A and B stay independent.
+ *   [ config bar ................................... | Run / Cancel ]
+ *   [ Left folder path | counts + tools | Right folder path         ]
+ *   [ A explorer | Left canvas | Output canvas | Right canvas | B   ]
+ *   [ metrics dashboard (progress when running)                     ]
  */
 export function FolderCompareMode({ session }: Props) {
   const setFolderDirs = useSessions((s) => s.setFolderDirs);
@@ -94,7 +89,6 @@ export function FolderCompareMode({ session }: Props) {
     };
   }, [session.activeReferencePath, session.activeTargetPath]);
 
-  // Auto-scan whenever both dirs are set; cancel any stream on pair change.
   useEffect(() => {
     if (!session.referenceDir || !session.targetDir) return;
     let cancelled = false;
@@ -194,6 +188,7 @@ export function FolderCompareMode({ session }: Props) {
               kind: "error",
               message: evt.message,
             });
+            toast("error", `Run failed: ${evt.message}`);
             streamRef.current = null;
             break;
         }
@@ -275,10 +270,10 @@ export function FolderCompareMode({ session }: Props) {
       : pairStatus?.kind === "error"
         ? `Error: ${pairStatus.message}`
         : pairStatus?.kind === "cancelled"
-          ? "Comparison cancelled. Click Compare pair to retry."
+          ? "Comparison cancelled. Click Run to retry."
           : session.layer === "diagnostic_overlay.png" && report && unifiedBuilding
             ? "Compositing unified view…"
-            : "Click Compare pair to run";
+            : "Click Run to compare this pair";
 
   const onAddBox = useCallback(
     (box: BoundingBox) => {
@@ -301,6 +296,7 @@ export function FolderCompareMode({ session }: Props) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    toast("success", `Saved ${filename}`);
   }, []);
 
   const toggleLayer = useCallback((key: UnifiedArtifact) => {
@@ -312,10 +308,28 @@ export function FolderCompareMode({ session }: Props) {
     });
   }, []);
 
-  // Independent file lists, derived from scan.pairs + unmatched.
   const { referenceFiles, targetFiles } = useMemo(
     () => explodeFileLists(session.scan),
     [session.scan],
+  );
+
+  const runButton = running ? (
+    <button
+      type="button"
+      onClick={cancelPair}
+      className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20 transition-colors"
+    >
+      <XCircle size={13} /> Cancel
+    </button>
+  ) : (
+    <button
+      type="button"
+      disabled={!canRun}
+      onClick={runPair}
+      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed transition-colors"
+    >
+      <Play size={13} /> Run
+    </button>
   );
 
   return (
@@ -324,49 +338,29 @@ export function FolderCompareMode({ session }: Props) {
         sessionId={session.id}
         params={session.params}
         activePaths={[session.activeReferencePath, session.activeTargetPath]}
+        action={runButton}
       />
 
       <SessionHeader
         kind="directory"
-        leftLabel="A · Folder"
-        rightLabel="B · Folder"
+        leftLabel="Left · Folder"
+        rightLabel="Right · Folder"
         leftValue={session.referenceDir}
         onCommitLeft={onCommitADir}
         rightValue={session.targetDir}
         onCommitRight={onCommitBDir}
         middle={
-          <div className="flex items-center gap-3 px-2 w-full justify-center">
+          <div className="flex items-center gap-3 w-full justify-center">
             {session.scan && (
               <div className="text-[11px] text-text-muted tabular-nums shrink-0">
-                {referenceFiles.length} A · {targetFiles.length} B
+                {referenceFiles.length} · {targetFiles.length}
               </div>
             )}
-            {running && pairStatus?.kind === "running" ? (
-              <ProgressBar status={pairStatus} />
-            ) : null}
             <ColorPalette value={drawColor} onChange={setDrawColor} />
             <ClearAnnotationsButton
               count={annotations.length}
               onClick={() => currentPairId && clearAnnotations(session.id, currentPairId)}
             />
-            {running ? (
-              <button
-                type="button"
-                onClick={cancelPair}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-signal-danger/50 bg-signal-danger/10 text-signal-danger text-[12px] font-medium hover:bg-signal-danger/20"
-              >
-                <XCircle size={13} /> Cancel
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={!canRun}
-                onClick={runPair}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent text-white text-[12px] font-medium hover:bg-accent-hot disabled:bg-surface-sunken disabled:text-text-faint disabled:cursor-not-allowed"
-              >
-                <Play size={13} /> Compare pair
-              </button>
-            )}
           </div>
         }
       />
@@ -384,7 +378,7 @@ export function FolderCompareMode({ session }: Props) {
           <ImageCanvas
             sessionId={session.id}
             src={refSrc}
-            label="A · Reference"
+            label="Left · Reference"
             placeholder="Pick a file in Folder A on the left"
             boxes={annotations}
             onDeleteBox={onDeleteBox}
@@ -394,26 +388,16 @@ export function FolderCompareMode({ session }: Props) {
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border relative">
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 max-w-[92%]">
-            <LayerDropdown
-              value={session.layer}
-              onChange={(l) => setLayer(session.id, l)}
-              available={available}
-            />
-            {session.layer === "diagnostic_overlay.png" && report && (
-              <div className="px-2 py-1.5 rounded-md bg-surface-raised/90 backdrop-blur border border-surface-border">
-                <UnifiedToggles
-                  enabled={unifiedToggled}
-                  onToggle={toggleLayer}
-                  available={available}
-                />
-              </div>
-            )}
-          </div>
           <ImageCanvas
             sessionId={session.id}
             src={middleSrc}
-            label={`Output · ${labelFor(session.layer)}`}
+            headerSlot={
+              <LayerDropdown
+                value={session.layer}
+                onChange={(l) => setLayer(session.id, l)}
+                available={available}
+              />
+            }
             placeholder={middlePlaceholder}
             drawable
             drawColor={drawColor}
@@ -423,13 +407,23 @@ export function FolderCompareMode({ session }: Props) {
             onSave={onSaveImage}
             saveFilenameBase={`${labelFor(session.layer)}-annotated`}
           />
+          {session.layer === "diagnostic_overlay.png" && report && (
+            <div className="absolute top-12 left-2 z-10 pointer-events-auto">
+              <UnifiedToggles
+                enabled={unifiedToggled}
+                onToggle={toggleLayer}
+                available={available}
+                orientation="vertical"
+              />
+            </div>
+          )}
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col border-r border-surface-border">
           <ImageCanvas
             sessionId={session.id}
             src={tgtSrc}
-            label="B · Target"
+            label="Right · Target"
             placeholder="Pick a file in Folder B on the right"
             boxes={annotations}
             onDeleteBox={onDeleteBox}
@@ -446,12 +440,14 @@ export function FolderCompareMode({ session }: Props) {
         />
       </div>
 
-      <MetricsDashboard report={report} status={pairStatus?.kind ?? "idle"} />
+      <MetricsDashboard
+        report={report}
+        status={pairStatus?.kind ?? "idle"}
+        runningStatus={pairStatus?.kind === "running" ? pairStatus : undefined}
+      />
     </div>
   );
 }
-
-// -------------------------- File list column --------------------------
 
 function FileList({
   label,
@@ -510,7 +506,6 @@ function FileList({
   );
 }
 
-/** Explode a scan response into two independent file lists (A and B). */
 function explodeFileLists(scan: FolderScanResponse | null): {
   referenceFiles: string[];
   targetFiles: string[];
@@ -524,7 +519,6 @@ function explodeFileLists(scan: FolderScanResponse | null): {
     ...scan.pairs.map((p) => p.target_path),
     ...scan.unmatched_target,
   ];
-  // Sort by basename, keep absolute paths unique.
   return {
     referenceFiles: Array.from(new Set(ref)).sort(cmpByBasename),
     targetFiles: Array.from(new Set(tgt)).sort(cmpByBasename),
