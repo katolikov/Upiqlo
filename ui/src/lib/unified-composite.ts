@@ -72,7 +72,21 @@ export interface BuildUnifiedArgs {
 }
 
 /** Load a mask and return both its strength channel and its per-pixel
- * RGB (from the jet colormap or binary white mask). */
+ * RGB (from the jet colormap or binary white mask).
+ *
+ * Strength extraction is adaptive per pixel:
+ *   - If the pixel is roughly chromatic (channel spread ≥ 40), it's
+ *     from a jet colourmap. In jet, low values are blue / cyan and
+ *     high values are yellow / red — the anomaly axis is R − B. We
+ *     encode that as `max(0, min(255, (R − B) + 128))` so pure blue
+ *     maps to 0, green to ~128, and yellow/red to 255.
+ *   - Otherwise the pixel is greyscale (binary mask on black), and
+ *     we use the peak channel directly.
+ *
+ * This makes the blue half of the jet colormap fall BELOW the floor
+ * automatically, so the target image shows through untinted there —
+ * which is what the user expects ("apply only where it's not blue").
+ */
 function extractMaskRGBA(
   img: HTMLImageElement,
   w: number,
@@ -94,9 +108,18 @@ function extractMaskRGBA(
     rgb[k] = r;
     rgb[k + 1] = g;
     rgb[k + 2] = b;
-    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    const peak = Math.max(r, g, b);
-    strength[j] = Math.max(lum, peak) | 0;
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    let s: number;
+    if (spread >= 40) {
+      // Jet-ish chromatic pixel: R − B axis (blue low, red high).
+      s = r - b + 128;
+      if (s < 0) s = 0;
+      else if (s > 255) s = 255;
+    } else {
+      // Near-greyscale pixel: use peak channel (binary white on black).
+      s = Math.max(r, g, b);
+    }
+    strength[j] = s | 0;
   }
   return { strength, rgb };
 }
