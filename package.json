@@ -1,7 +1,7 @@
 {
   "name": "upiqlo",
   "private": true,
-  "version": "0.5.18",
+  "version": "1.0.0",
   "description": "Cross-platform desktop app wrapping the FR-IQA (UPIQAL) image-quality algorithm.",
   "workspaces": [
     "ui"

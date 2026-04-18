@@ -1,6 +1,6 @@
 [package]
 name = "upiqlo"
-version = "0.1.0"
+version = "1.0.0"
 description = "Upiqlo desktop host — FR-IQA image comparison."
 authors = ["Upiqlo"]
 edition = "2021"
