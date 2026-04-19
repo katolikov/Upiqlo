@@ -31,6 +31,12 @@ export function ProgressBar({
   const [value, setValue] = useState(target);
   const prevTarget = useRef(target);
   const started = useRef(Date.now());
+  // Monotonic floor — the displayed bar must never decrease within a
+  // single run. We only reset it when a NEW run starts (status
+  // identified by startedAt; a smaller target is treated as late /
+  // out-of-order stage gossip, not a rewind).
+  const runIdRef = useRef(status.startedAt);
+  const highWaterRef = useRef(target);
 
   useEffect(() => {
     let raf = 0;
@@ -40,13 +46,23 @@ export function ProgressBar({
         let goal = target;
         if (stage) {
           const perStage = Math.max(0.5, expectedSeconds / stage.total);
-          const inStageProgress = Math.min(1, (runtime % perStage) / perStage);
+          // Saturate at 1 instead of wrapping with modulo — when a
+          // stage takes longer than `perStage` seconds, the previous
+          // `runtime % perStage` would snap back to 0 and drag the
+          // bar backward. Saturation keeps the bar at its creep max
+          // until the next real stage event moves it forward.
+          const inStageProgress = Math.min(1, runtime / perStage);
           const nextBoundary = Math.min(1, (stage.index + inStageProgress * 0.6) / stage.total);
           goal = Math.max(target, nextBoundary);
         }
+        // Enforce a monotonic floor per run.
+        if (goal < highWaterRef.current) goal = highWaterRef.current;
         const delta = goal - cur;
-        if (Math.abs(delta) < 0.0005) return cur;
-        return cur + delta * 0.1;
+        if (Math.abs(delta) < 0.0005) return Math.max(cur, highWaterRef.current);
+        const next = cur + delta * 0.1;
+        const clamped = Math.max(next, highWaterRef.current);
+        if (clamped > highWaterRef.current) highWaterRef.current = clamped;
+        return clamped;
       });
       raf = requestAnimationFrame(animate);
     };
@@ -60,6 +76,15 @@ export function ProgressBar({
       started.current = Date.now();
     }
   }, [target]);
+
+  // Reset the monotonic floor only when a genuinely new run starts.
+  useEffect(() => {
+    if (runIdRef.current !== status.startedAt) {
+      runIdRef.current = status.startedAt;
+      highWaterRef.current = 0;
+      setValue(0);
+    }
+  }, [status.startedAt]);
 
   const pct = Math.round(value * 100);
 
