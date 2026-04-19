@@ -173,8 +173,15 @@ jobs:
           $ref = "$testDir\left.png"
           $tgt = "$testDir\right.png"
 
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/katolikov/FR-IQA-Algo/main/left.png"  -OutFile $ref -UseBasicParsing
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/katolikov/FR-IQA-Algo/main/right.png" -OutFile $tgt -UseBasicParsing
+          $refUrl = "https://raw.githubusercontent.com/katolikov/FR-IQA-Algo/main/docs/examples/cartoon_A_reference.png"
+          $tgtUrl = "https://raw.githubusercontent.com/katolikov/FR-IQA-Algo/main/docs/examples/cartoon_B_target.png"
+          try {
+            Invoke-WebRequest -Uri $refUrl -OutFile $ref -UseBasicParsing
+            Invoke-WebRequest -Uri $tgtUrl -OutFile $tgt -UseBasicParsing
+          } catch {
+            Write-Host "Failed to download test PNGs: $_"
+            exit 1
+          }
           Write-Host "Reference: $ref ($((Get-Item $ref).Length) bytes)"
           Write-Host "Target:    $tgt ($((Get-Item $tgt).Length) bytes)"
 
