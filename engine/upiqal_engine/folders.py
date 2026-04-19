@@ -81,18 +81,36 @@ class FolderScan:
 
 
 def _list_images(directory: Path) -> List[Path]:
-    """Return sorted image files in ``directory`` (non-recursive, no hidden)."""
+    """Return sorted image files in ``directory`` (non-recursive, no hidden).
+
+    On Windows, ``iterdir()`` can raise ``PermissionError`` (ACL-locked
+    dirs), ``OSError`` (UNC-path failures, broken junctions) or trip on
+    non-UTF-8 filenames. Individual ``entry.is_file()`` calls may also
+    raise on broken symlinks. Catch each entry's errors so one bad file
+    doesn't make the whole folder appear empty to the user.
+    """
     if not directory.is_dir():
         raise FileNotFoundError(f"not a directory: {directory}")
+    try:
+        entries = list(directory.iterdir())
+    except PermissionError as e:
+        raise PermissionError(f"cannot read directory {directory}: {e}") from e
+    except OSError as e:
+        raise OSError(f"cannot list directory {directory}: {e}") from e
     out: List[Path] = []
-    for entry in directory.iterdir():
-        if entry.name.startswith("."):
+    for entry in entries:
+        try:
+            if entry.name.startswith("."):
+                continue
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() not in IMAGE_EXTS:
+                continue
+            out.append(entry)
+        except OSError:
+            # Broken symlink / junction / ACL-locked entry — skip it
+            # instead of failing the whole scan.
             continue
-        if not entry.is_file():
-            continue
-        if entry.suffix.lower() not in IMAGE_EXTS:
-            continue
-        out.append(entry)
     out.sort(key=lambda p: p.name.lower())
     return out
 

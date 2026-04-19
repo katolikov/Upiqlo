@@ -99,6 +99,8 @@ export function FolderCompareMode({ session }: Props) {
       .catch((e) => {
         if (cancelled) return;
         console.error("scan failed", e);
+        const msg = e instanceof Error ? e.message : String(e);
+        toast("error", `Folder scan failed: ${msg}`);
       });
     return () => {
       cancelled = true;

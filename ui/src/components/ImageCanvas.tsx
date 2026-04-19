@@ -29,16 +29,20 @@ function shortHash(): string {
  * last segment before any variant suffix. Works for both POSIX and
  * Windows paths. */
 function buildUpiqalDestination(sourcePath: string, variant?: string): string {
-  const sep = sourcePath.includes("\\") && !sourcePath.includes("/") ? "\\" : "/";
+  // Always emit forward slashes — Tauri v2's fs:scope glob (`C:/**`)
+  // matches forward-slash paths on Windows but rejects backslashes,
+  // so preserving the user's native separator here causes
+  // "forbidden path" rejections on `fs.writeFile`. Windows APIs accept
+  // forward slashes in filenames, so this is a lossless change.
   const lastSepIx = Math.max(sourcePath.lastIndexOf("/"), sourcePath.lastIndexOf("\\"));
-  const dir = lastSepIx >= 0 ? sourcePath.slice(0, lastSepIx) : "";
+  const dir = lastSepIx >= 0 ? sourcePath.slice(0, lastSepIx).replace(/\\/g, "/") : "";
   const file = lastSepIx >= 0 ? sourcePath.slice(lastSepIx + 1) : sourcePath;
   const dotIx = file.lastIndexOf(".");
   const stem = dotIx > 0 ? file.slice(0, dotIx) : file;
   const hash = shortHash();
   const suffix = variant ? `_${hash}_upiqal_${variant}` : `_${hash}_upiqal`;
   const filename = `${stem}${suffix}.png`;
-  return dir ? `${dir}${sep}${filename}` : filename;
+  return dir ? `${dir}/${filename}` : filename;
 }
 
 function basename(p: string): string {

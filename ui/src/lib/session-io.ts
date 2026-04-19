@@ -188,8 +188,13 @@ export async function saveUpiqalFile(
         filters: [{ name: "Upiqal session", extensions: ["upiqal"] }],
       });
       if (!path) return { path: null, filename: base };
-      await fs.writeTextFile(path, json);
-      return { path, filename: path.split(/[\\/]/).pop() ?? base };
+      // Normalize backslashes — Tauri v2's fs:scope matches forward-
+      // slash paths even on Windows, and the dialog returns native
+      // backslashes that otherwise trigger a "forbidden path" error
+      // from fs.writeTextFile.
+      const normalized = path.replace(/\\/g, "/");
+      await fs.writeTextFile(normalized, json);
+      return { path: normalized, filename: normalized.split(/[\\/]/).pop() ?? base };
     } catch (err) {
       console.warn("tauri save dialog failed, falling back", err);
     }

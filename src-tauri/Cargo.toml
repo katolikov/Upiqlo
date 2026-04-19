@@ -1,6 +1,6 @@
 [package]
 name = "upiqal"
-version = "1.0.7"
+version = "1.0.8"
 description = "Upiqal desktop host — FR-IQA image comparison."
 authors = ["Upiqal"]
 edition = "2021"

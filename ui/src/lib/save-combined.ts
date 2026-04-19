@@ -61,16 +61,20 @@ function shortHash(): string {
 }
 
 function destinationFor(targetPath: string, variant?: string): string {
-  const sep = targetPath.includes("\\") && !targetPath.includes("/") ? "\\" : "/";
+  // Always emit forward slashes — Tauri v2's fs:scope pattern uses
+  // forward slashes even on Windows, and `fs.writeFile` rejects paths
+  // whose separators don't match the scope. Windows FS APIs accept
+  // "C:/Users/..." interchangeably with "C:\\Users\\...", so this is
+  // safe on every platform.
   const lastSepIx = Math.max(targetPath.lastIndexOf("/"), targetPath.lastIndexOf("\\"));
-  const dir = lastSepIx >= 0 ? targetPath.slice(0, lastSepIx) : "";
+  const dir = lastSepIx >= 0 ? targetPath.slice(0, lastSepIx).replace(/\\/g, "/") : "";
   const file = lastSepIx >= 0 ? targetPath.slice(lastSepIx + 1) : targetPath;
   const dotIx = file.lastIndexOf(".");
   const stem = dotIx > 0 ? file.slice(0, dotIx) : file;
   const hash = shortHash();
   const suffix = variant ? `_${hash}_upiqal_combined_${variant}` : `_${hash}_upiqal_combined`;
   const filename = `${stem}${suffix}.png`;
-  return dir ? `${dir}${sep}${filename}` : filename;
+  return dir ? `${dir}/${filename}` : filename;
 }
 
 async function loadBytesAsImage(src: string): Promise<HTMLImageElement> {

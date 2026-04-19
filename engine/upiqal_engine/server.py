@@ -229,6 +229,13 @@ def create_app() -> FastAPI:
             )
         except FileNotFoundError as e:
             raise HTTPException(status_code=400, detail=str(e))
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        except OSError as e:
+            # Windows UNC / junction / unreadable-entry failures — surface
+            # the actual message so the UI can show it to the user instead
+            # of silently displaying an empty folder.
+            raise HTTPException(status_code=400, detail=f"scan error: {e}")
         for p in result.pairs:
             _remember_path(p.reference_path, p.target_path)
         for p in result.unmatched_reference:
