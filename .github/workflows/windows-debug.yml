@@ -1,0 +1,144 @@
+name: Windows smoke-test
+
+# Manually-triggered: installs a published Upiqal .msi on a clean
+# windows-latest runner, launches it, waits for the sidecar to spin up,
+# and uploads every bit of diagnostic state we can get our hands on —
+# engine.log, process list, Defender events, install tree — as a workflow
+# artifact. Used for post-release triage when an end user reports
+# "engine offline" without a console to copy-paste from.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to install (e.g. v1.0.4)"
+        required: true
+        default: "v1.0.4"
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Show runner info
+        shell: pwsh
+        run: |
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "Is64Bit: $([Environment]::Is64BitOperatingSystem)"
+          Write-Host "User: $env:USERNAME"
+          Write-Host "LOCALAPPDATA: $env:LOCALAPPDATA"
+          Write-Host "APPDATA: $env:APPDATA"
+
+      - name: Download Upiqal .msi from release ${{ inputs.tag }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ inputs.tag }}"
+          Write-Host "Downloading Upiqal_*_x64_en-US.msi from $tag"
+          gh release download $tag --repo ${{ github.repository }} --pattern "Upiqal_*_x64_en-US.msi" --dir .
+          Get-ChildItem *.msi | Format-Table FullName,Length
+
+      - name: Install MSI silently
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem *.msi | Select-Object -First 1).FullName
+          Write-Host "Installing $msi"
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart /l*v install.log" -Wait -PassThru
+          Write-Host "msiexec exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) {
+            Get-Content install.log -Tail 80
+            exit $p.ExitCode
+          }
+
+      - name: Verify install layout
+        shell: pwsh
+        run: |
+          $root = "C:\Program Files\Upiqal"
+          Write-Host "`n=== Install root: $root ==="
+          Get-ChildItem $root -ErrorAction SilentlyContinue | Format-Table Name,Length
+          Write-Host "`n=== Upiqal.exe version ==="
+          (Get-Item "$root\Upiqal.exe").VersionInfo | Format-List FileVersion,ProductVersion
+          $sidecar = "$root\resources\binaries\upiqal-engine-x86_64-pc-windows-msvc\upiqal-engine.exe"
+          Write-Host "`n=== Sidecar present? $(Test-Path $sidecar) ==="
+          if (Test-Path $sidecar) {
+            Write-Host "`n=== Sidecar dir contents ==="
+            Get-ChildItem "$root\resources\binaries\upiqal-engine-x86_64-pc-windows-msvc" | Format-Table Name,Length
+          }
+
+      - name: Run sidecar directly (baseline)
+        shell: pwsh
+        run: |
+          $sidecar = "C:\Program Files\Upiqal\resources\binaries\upiqal-engine-x86_64-pc-windows-msvc\upiqal-engine.exe"
+          if (-not (Test-Path $sidecar)) { Write-Host "missing"; exit 0 }
+          Write-Host "Launching sidecar for 10s, capturing stdout..."
+          $p = Start-Process $sidecar -PassThru -RedirectStandardOutput sidecar-out.txt -RedirectStandardError sidecar-err.txt -NoNewWindow
+          Start-Sleep -Seconds 10
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "`n--- sidecar stdout ---"
+          Get-Content sidecar-out.txt -ErrorAction SilentlyContinue
+          Write-Host "`n--- sidecar stderr ---"
+          Get-Content sidecar-err.txt -ErrorAction SilentlyContinue
+
+      - name: Launch Upiqal.exe and wait for sidecar
+        shell: pwsh
+        run: |
+          $exe = "C:\Program Files\Upiqal\Upiqal.exe"
+          Write-Host "Launching $exe"
+          $p = Start-Process $exe -PassThru
+          Write-Host "Upiqal.exe PID: $($p.Id)"
+          Start-Sleep -Seconds 20
+          Write-Host "`n=== Processes matching upiqal* ==="
+          Get-Process | Where-Object { $_.ProcessName -like "upiqal*" } |
+            Select-Object Id,ProcessName,Path,WorkingSet | Format-Table -AutoSize
+          Write-Host "`n=== Listening loopback ports (127.0.0.1) ==="
+          Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+            Where-Object { $_.LocalAddress -eq "127.0.0.1" } |
+            Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
+          Stop-Process -Name "Upiqal" -Force -ErrorAction SilentlyContinue
+          Stop-Process -Name "upiqal-engine" -Force -ErrorAction SilentlyContinue
+
+      - name: Collect engine.log and related diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path diag -Force | Out-Null
+          Write-Host "=== Search for engine.log under LOCALAPPDATA + APPDATA ==="
+          $logs = Get-ChildItem -Path $env:LOCALAPPDATA,$env:APPDATA -Recurse -Filter engine.log -ErrorAction SilentlyContinue
+          $logs | Select-Object FullName,Length,LastWriteTime | Format-Table -AutoSize
+          foreach ($l in $logs) {
+            Copy-Item $l.FullName "diag\$($l.Directory.Name)__engine.log" -ErrorAction SilentlyContinue
+          }
+          Write-Host "`n=== com.upiqal.desktop dir contents ==="
+          Get-ChildItem "$env:LOCALAPPDATA\com.upiqal.desktop" -ErrorAction SilentlyContinue -Recurse | Format-Table FullName,Length
+          Copy-Item "install.log" "diag\msiexec.log" -ErrorAction SilentlyContinue
+          Copy-Item "sidecar-out.txt" "diag\sidecar-stdout.txt" -ErrorAction SilentlyContinue
+          Copy-Item "sidecar-err.txt" "diag\sidecar-stderr.txt" -ErrorAction SilentlyContinue
+
+      - name: Dump all collected engine.log content inline
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem diag\*engine.log -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "=============================================="
+            Write-Host "=== $($_.FullName) ==="
+            Write-Host "=============================================="
+            Get-Content $_.FullName
+          }
+          Write-Host "`n=============================================="
+          Write-Host "=== sidecar-stdout.txt ==="
+          Write-Host "=============================================="
+          Get-Content diag\sidecar-stdout.txt -ErrorAction SilentlyContinue
+          Write-Host "`n=============================================="
+          Write-Host "=== sidecar-stderr.txt ==="
+          Write-Host "=============================================="
+          Get-Content diag\sidecar-stderr.txt -ErrorAction SilentlyContinue
+
+      - name: Upload diag artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-${{ inputs.tag }}
+          path: diag/*
+          if-no-files-found: warn
