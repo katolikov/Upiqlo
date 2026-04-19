@@ -54,6 +54,14 @@ jobs:
         with:
           submodules: recursive
 
+      # Sibling checkout so `engine/scripts/vendor_algorithm.py` can
+      # pick up the FR-IQA algorithm source + weights. The vendor
+      # script resolves the algo repo as `../../FR-IQA-Algo` relative
+      # to itself — i.e. `$GITHUB_WORKSPACE/../FR-IQA-Algo`.
+      - name: Clone FR-IQA-Algo sibling
+        shell: bash
+        run: git clone --depth 1 https://github.com/katolikov/FR-IQA-Algo.git "${{ github.workspace }}/../FR-IQA-Algo"
+
       # -- Toolchains --------------------------------------------------
       - uses: actions/setup-node@v4
         with:
