@@ -125,6 +125,34 @@ Each job runs engine pytest, builds + smoke-tests the PyInstaller sidecar,
 stages it into `src-tauri/binaries/`, and runs `cargo tauri build`. Enable by
 uncommenting the `push` / `pull_request` triggers in the workflow YAML.
 
+## Installing a downloaded release
+
+### macOS
+
+The `.dmg` / `.app` assets published on the GitHub Releases page are **not
+code-signed or notarized** (no Apple Developer ID is wired into CI yet).
+Gatekeeper on Apple Silicon will refuse to launch a freshly-downloaded
+Upiqal with a popup that says *"Upiqal is damaged and can't be opened."*
+The app is not actually damaged — macOS just quarantined it because it
+wasn't signed.
+
+Drag `Upiqal.app` to `/Applications`, then strip the quarantine flag once:
+
+```bash
+xattr -cr /Applications/Upiqal.app
+```
+
+After that the app launches normally on every future run. The same applies
+if you extract the `.app` directly from the `.dmg` by drag-and-drop — `xattr
+-cr` on the destination folder clears it. Once the project ships signed +
+notarized builds, this step will no longer be needed.
+
+### Windows / Linux
+
+No extra steps beyond running the installer (`.msi` / `.exe`, `.deb` /
+`.AppImage`). SmartScreen on Windows may show an "Unrecognised publisher"
+dialog for unsigned builds; click *More info → Run anyway*.
+
 ## Project layout
 
 ```

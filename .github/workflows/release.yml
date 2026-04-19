@@ -154,8 +154,30 @@ jobs:
 
       - name: Tauri build
         env:
+          # Tauri updater signing (for auto-update, not platform code signing).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple Developer ID code signing + notarization. All empty until
+          # the corresponding secrets are populated in the repo; Tauri's
+          # bundler will silently skip signing when these are unset, so the
+          # build still produces an (unsigned) .app/.dmg and users can bypass
+          # Gatekeeper with `xattr -cr Upiqal.app`. Populate these secrets
+          # (Apple Developer Program required) to get signed + notarized
+          # macOS builds automatically on the next tagged release.
+          # Classic auth:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # App Store Connect API-key auth (alternative to APPLE_ID/PASSWORD):
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          # Windows code signing (populate to silence SmartScreen warnings).
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: npx tauri build --config src-tauri/tauri.conf.json --target ${{ matrix.target }}
 
       # -- Upload to the GitHub Release --------------------------------
