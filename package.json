@@ -1,7 +1,7 @@
 {
   "name": "upiqal",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Cross-platform desktop app wrapping the FR-IQA (UPIQAL) image-quality algorithm.",
   "workspaces": [
     "ui"

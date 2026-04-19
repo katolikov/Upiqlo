@@ -137,6 +137,17 @@ jobs:
         run: python engine/scripts/build_sidecar.py
         shell: bash
 
+      # Stage the onedir sidecar into src-tauri/binaries/ so the
+      # `resources` glob in tauri.conf.json ("binaries/upiqal-engine-*/**/*")
+      # resolves during `tauri build`.
+      - name: Stage sidecar into src-tauri/binaries
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          rm -rf "src-tauri/binaries/upiqal-engine-${{ matrix.target }}"
+          cp -R "engine/dist/upiqal-engine-${{ matrix.target }}" "src-tauri/binaries/upiqal-engine-${{ matrix.target }}"
+          ls src-tauri/binaries
+
       # -- Build the UI + Tauri bundle ---------------------------------
       - name: Install UI deps
         run: npm ci
