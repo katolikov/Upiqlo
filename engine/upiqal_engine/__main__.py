@@ -83,14 +83,16 @@ def main() -> None:
     # can read it at request-handling time.
     os.environ["UPIQAL_ENGINE_TOKEN"] = token
 
-    # Force line-buffered stdout so every subsequent write flushes at a
-    # newline. Matters on Windows where pipe-backed stdout is otherwise
-    # block-buffered and the handshake never reaches the Tauri parent
-    # until uvicorn logs push the buffer past ~8 KB.
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except AttributeError:
-        pass
+    # Force UTF-8 + line-buffered stdout/stderr. On Windows, pipe-backed
+    # stdio inherited by the frozen child is cp1252 + block-buffered,
+    # which (a) holds the handshake lines in a ~8 KB buffer so they
+    # never reach the Tauri parent, and (b) explodes with "'charmap'
+    # codec can't encode" the first time a non-ASCII path is logged.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     sys.stdout.write(f"UPIQAL_ENGINE_PORT={port}\n")
     sys.stdout.write(f"UPIQAL_ENGINE_TOKEN={token}\n")

@@ -40,18 +40,24 @@ RESULT_END = "__UPIQAL_RESULT_END__"
 
 
 def main() -> None:
+    # Force UTF-8 + line-buffered stdout/stderr BEFORE any other code
+    # runs. On Windows the PyInstaller-frozen child inherits cp1252 as
+    # the stdio encoding, which raises "'charmap' codec can't encode
+    # characters" the instant upstream prints a file path containing
+    # non-ASCII (e.g. a Cyrillic username like C:\Users\Артём\…).
+    # PYTHONIOENCODING is unreliable inside PyInstaller bootloader, so
+    # we reconfigure() explicitly here.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(prog="upiqal_engine.subworker")
     parser.add_argument("--reference", required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--params-json", required=True)
     args = parser.parse_args()
-
-    # Line-buffer stdout so the parent SSE handler sees stage lines the
-    # instant upstream prints them.
-    try:
-        sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
-    except Exception:
-        pass
 
     params = CompareParams.model_validate_json(args.params_json)
 
