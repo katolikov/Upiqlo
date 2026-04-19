@@ -83,6 +83,15 @@ def main() -> None:
     # can read it at request-handling time.
     os.environ["UPIQAL_ENGINE_TOKEN"] = token
 
+    # Force line-buffered stdout so every subsequent write flushes at a
+    # newline. Matters on Windows where pipe-backed stdout is otherwise
+    # block-buffered and the handshake never reaches the Tauri parent
+    # until uvicorn logs push the buffer past ~8 KB.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
     sys.stdout.write(f"UPIQAL_ENGINE_PORT={port}\n")
     sys.stdout.write(f"UPIQAL_ENGINE_TOKEN={token}\n")
     sys.stdout.flush()
