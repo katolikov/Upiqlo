@@ -151,6 +151,77 @@ jobs:
           $g.Dispose(); $bmp.Dispose()
           Write-Host "Screenshot saved: upiqal-ui.png ($((Get-Item upiqal-ui.png).Length) bytes)"
 
+      # Real compare test: fetch a pair of tiny reference/target PNGs from
+      # the FR-IQA-Algo repo, stash them under a path with a Cyrillic
+      # directory name (repro for the charmap codec bug), then POST to
+      # /api/compare-paths with the bearer token — exactly what the UI's
+      # Compare button triggers. Asserts we get a JSON report with a
+      # numeric score back, not an __UPIQAL_ERROR__ string.
+      - name: Run a real compare via /api/compare-paths
+        shell: pwsh
+        run: |
+          $log = "$env:LOCALAPPDATA\com.upiqal.desktop\engine.log"
+          $content = Get-Content $log -Raw
+          $port = ($content | Select-String -Pattern 'UPIQAL_ENGINE_PORT=(\d+)' -AllMatches).Matches[-1].Groups[1].Value
+          $token = ($content | Select-String -Pattern 'UPIQAL_ENGINE_TOKEN=([A-Za-z0-9_\-]+)' -AllMatches).Matches[-1].Groups[1].Value
+          Write-Host "Using port=$port, token len=$($token.Length)"
+
+          # Non-ASCII parent dir to reproduce the Windows encoding issue
+          # users hit with e.g. C:\Users\Артём\... paths.
+          $testDir = "$env:TEMP\upiqal-тест"
+          New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+          $ref = "$testDir\left.png"
+          $tgt = "$testDir\right.png"
+
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/katolikov/FR-IQA-Algo/main/left.png"  -OutFile $ref -UseBasicParsing
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/katolikov/FR-IQA-Algo/main/right.png" -OutFile $tgt -UseBasicParsing
+          Write-Host "Reference: $ref ($((Get-Item $ref).Length) bytes)"
+          Write-Host "Target:    $tgt ($((Get-Item $tgt).Length) bytes)"
+
+          # Relaunch Upiqal.exe so the sidecar is hot for the compare.
+          Start-Process "C:\Program Files\Upiqal\Upiqal.exe" | Out-Null
+          Start-Sleep -Seconds 8
+
+          # Re-read the (new) port + token after relaunch.
+          $content2 = Get-Content $log -Raw
+          $port = ($content2 | Select-String -Pattern 'UPIQAL_ENGINE_PORT=(\d+)' -AllMatches).Matches[-1].Groups[1].Value
+          $token = ($content2 | Select-String -Pattern 'UPIQAL_ENGINE_TOKEN=([A-Za-z0-9_\-]+)' -AllMatches).Matches[-1].Groups[1].Value
+          Write-Host "Relaunched — port=$port, token len=$($token.Length)"
+
+          $body = @{
+            reference_path = $ref
+            target_path    = $tgt
+            session_id     = "ci-smoke"
+            pair_id        = "pair-1"
+            params         = @{ max_side = 256; score_mode = "sigmoid" }
+          } | ConvertTo-Json -Depth 4
+
+          $headers = @{
+            Authorization = "Bearer $token"
+            "Content-Type" = "application/json"
+          }
+          $url = "http://127.0.0.1:$port/api/compare-paths"
+          Write-Host "POST $url"
+
+          try {
+            $resp = Invoke-WebRequest -Uri $url -Method POST -Headers $headers -Body $body -UseBasicParsing -TimeoutSec 180
+            Write-Host "HTTP status: $($resp.StatusCode)"
+            $report = $resp.Content | ConvertFrom-Json
+            Write-Host "=== CompareReport (truncated) ==="
+            Write-Host "score        : $($report.score)"
+            Write-Host "score_label  : $($report.score_label)"
+            Write-Host "dominant     : $($report.dominant_artifact)"
+            Write-Host "severity     : $($report.severity_bars | ConvertTo-Json -Compress)"
+            Write-Host "heatmap keys : $($report.heatmaps.PSObject.Properties.Name -join ', ')"
+            if ($null -eq $report.score) { throw "score missing — compare didn't produce a valid report" }
+            $resp.Content | Set-Content -Path "compare-report.json" -Encoding UTF8
+          } catch {
+            Write-Host "Compare failed: $_"
+            Write-Host "=== Last 40 lines of engine.log ==="
+            Get-Content $log -Tail 40
+            exit 1
+          }
+
       - name: Cleanup processes
         if: always()
         shell: pwsh
@@ -175,6 +246,7 @@ jobs:
           Copy-Item "sidecar-out.txt" "diag\sidecar-stdout.txt" -ErrorAction SilentlyContinue
           Copy-Item "sidecar-err.txt" "diag\sidecar-stderr.txt" -ErrorAction SilentlyContinue
           Copy-Item "upiqal-ui.png" "diag\upiqal-ui.png" -ErrorAction SilentlyContinue
+          Copy-Item "compare-report.json" "diag\compare-report.json" -ErrorAction SilentlyContinue
 
       - name: Dump all collected engine.log content inline
         if: always()
