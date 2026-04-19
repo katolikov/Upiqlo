@@ -24,17 +24,28 @@ function viteEnv(): Record<string, string | undefined> {
 
 let _cachedPort: number | null = null;
 let _cachedToken: string | null = null;
+// True once we've confirmed we're running inside Tauri at least once, so
+// we never silently fall back to a dev default port after that point.
+let _tauriConfirmed = false;
 
 export async function getEnginePort(): Promise<number> {
   if (_cachedPort !== null) return _cachedPort;
   const invoke = await getInvoke();
   if (invoke) {
-    try {
-      _cachedPort = await invoke<number>("get_engine_port");
-      return _cachedPort;
-    } catch (err) {
-      console.warn("get_engine_port via Tauri failed, falling back:", err);
-    }
+    _tauriConfirmed = true;
+    // The Rust host captures the port from the sidecar's stdout handshake
+    // asynchronously. Early calls (within the first ~1–3 s after launch)
+    // may race and reject with "engine has not announced a port yet".
+    // Rethrow WITHOUT caching so the next retry (e.g. TopBar's 5-second
+    // poll) actually re-invokes the Tauri command instead of returning a
+    // stale dev-default port forever. This bug manifested as a permanent
+    // "Engine offline" chip on Windows even though the engine was healthy.
+    const port = await invoke<number>("get_engine_port");
+    _cachedPort = port;
+    return port;
+  }
+  if (_tauriConfirmed) {
+    throw new Error("engine port unavailable (Tauri invoke missing on retry)");
   }
   const fromEnv = viteEnv().VITE_UPIQAL_ENGINE_PORT;
   _cachedPort = fromEnv ? Number(fromEnv) : 51017;
@@ -45,12 +56,15 @@ export async function getEngineToken(): Promise<string | null> {
   if (_cachedToken !== null) return _cachedToken;
   const invoke = await getInvoke();
   if (invoke) {
-    try {
-      _cachedToken = await invoke<string>("get_engine_token");
-      return _cachedToken;
-    } catch (err) {
-      console.warn("get_engine_token via Tauri failed, falling back:", err);
-    }
+    _tauriConfirmed = true;
+    // Same rationale as getEnginePort: propagate the error so the caller's
+    // retry loop actually retries instead of locking in a null token.
+    const token = await invoke<string>("get_engine_token");
+    _cachedToken = token;
+    return token;
+  }
+  if (_tauriConfirmed) {
+    return null;
   }
   const fromEnv = viteEnv().VITE_UPIQAL_ENGINE_TOKEN;
   if (fromEnv) {
