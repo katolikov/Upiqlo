@@ -1,14 +1,14 @@
-"""Entry point for the Upiqlo engine sidecar.
+"""Entry point for the Upiqal engine sidecar.
 
 Behaviour
 ---------
 1. Binds a free TCP port on 127.0.0.1.
-2. Generates a random bearer token (or uses UPIQLO_ENGINE_TOKEN_OVERRIDE
+2. Generates a random bearer token (or uses UPIQAL_ENGINE_TOKEN_OVERRIDE
    if set, so dev.sh can share the token with Vite).
 3. Prints exactly two handshake lines on stdout:
 
-       UPIQLO_ENGINE_PORT=<port>\n
-       UPIQLO_ENGINE_TOKEN=<token>\n
+       UPIQAL_ENGINE_PORT=<port>\n
+       UPIQAL_ENGINE_TOKEN=<token>\n
 
    The Tauri host reads these, stores the values in its state, and
    exposes them to the frontend via ``get_engine_port`` /
@@ -21,7 +21,7 @@ Inside a PyInstaller bundle, ``sys.executable`` is the bundle binary and
 ``python -m foo`` is not a valid invocation. The parent spawns its
 subworker by re-executing the bundle with the argv sentinel
 ``__subworker__`` as the first argument; this module recognises that
-sentinel and dispatches to :func:`upiqlo_engine.subworker.main` instead
+sentinel and dispatches to :func:`upiqal_engine.subworker.main` instead
 of starting the FastAPI server.
 
 All other engine output (uvicorn logs, algorithm progress, …) is routed
@@ -39,10 +39,10 @@ import sys
 import uvicorn
 
 # Absolute imports (not relative) so the module works both as
-#   ``python -m upiqlo_engine`` (dev, parent package is "upiqlo_engine")
+#   ``python -m upiqal_engine`` (dev, parent package is "upiqal_engine")
 # and as
 #   the PyInstaller bundle's __main__ (no parent package).
-from upiqlo_engine.logging_conf import configure_logging
+from upiqal_engine.logging_conf import configure_logging
 
 SUBWORKER_SENTINEL = "__subworker__"
 
@@ -55,7 +55,7 @@ def _pick_free_port() -> int:
 
 
 def _resolve_token() -> str:
-    env = os.environ.get("UPIQLO_ENGINE_TOKEN_OVERRIDE")
+    env = os.environ.get("UPIQAL_ENGINE_TOKEN_OVERRIDE")
     if env:
         return env
     return secrets.token_urlsafe(32)
@@ -67,32 +67,32 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == SUBWORKER_SENTINEL:
         # Rewrite argv so argparse in subworker.main() sees its expected flags.
         sys.argv = [sys.argv[0]] + sys.argv[2:]
-        from upiqlo_engine.subworker import main as subworker_main
+        from upiqal_engine.subworker import main as subworker_main
 
         subworker_main()
         return
 
     configure_logging()
-    log = logging.getLogger("upiqlo_engine")
+    log = logging.getLogger("upiqal_engine")
 
-    env_port = os.environ.get("UPIQLO_ENGINE_PORT_OVERRIDE")
+    env_port = os.environ.get("UPIQAL_ENGINE_PORT_OVERRIDE")
     port = int(env_port) if env_port else _pick_free_port()
     token = _resolve_token()
 
     # Publish the token to the server process via env so the FastAPI app
     # can read it at request-handling time.
-    os.environ["UPIQLO_ENGINE_TOKEN"] = token
+    os.environ["UPIQAL_ENGINE_TOKEN"] = token
 
-    sys.stdout.write(f"UPIQLO_ENGINE_PORT={port}\n")
-    sys.stdout.write(f"UPIQLO_ENGINE_TOKEN={token}\n")
+    sys.stdout.write(f"UPIQAL_ENGINE_PORT={port}\n")
+    sys.stdout.write(f"UPIQAL_ENGINE_TOKEN={token}\n")
     sys.stdout.flush()
 
-    log.info("Starting Upiqlo engine on 127.0.0.1:%s", port)
+    log.info("Starting Upiqal engine on 127.0.0.1:%s", port)
 
     # Pass the app object (not an import string) so uvicorn doesn't need
-    # to resolve "upiqlo_engine.server" through its own import machinery —
+    # to resolve "upiqal_engine.server" through its own import machinery —
     # that fails inside the PyInstaller bundle.
-    from upiqlo_engine.server import app
+    from upiqal_engine.server import app
 
     uvicorn.run(
         app,

@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 /**
- * Upiqlo palette.
+ * Upiqal palette.
  *
  * All colour tokens are backed by CSS custom properties declared in
  * `src/index.css`. That lets the Settings Modal flip the active theme

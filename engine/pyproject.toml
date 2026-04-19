@@ -3,11 +3,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "upiqlo-engine"
+name = "upiqal-engine"
 version = "0.1.0"
-description = "Local FastAPI sidecar that wraps the UPIQAL (FR-IQA) algorithm for the Upiqlo desktop app."
+description = "Local FastAPI sidecar that wraps the UPIQAL (FR-IQA) algorithm for the Upiqal desktop app."
 requires-python = ">=3.11,<3.13"
-authors = [{ name = "Upiqlo" }]
+authors = [{ name = "Upiqal" }]
 dependencies = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["upiqlo_engine"]
+packages = ["upiqal_engine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

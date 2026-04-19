@@ -13,12 +13,12 @@ Protocol
   stdout as they occur (no buffering — stdout is flushed line-by-line).
 * Child emits the final JSON blob wrapped in sentinels:
 
-      __UPIQLO_RESULT_START__
+      __UPIQAL_RESULT_START__
       {"score": ..., "heatmaps": {...}, ...}
-      __UPIQLO_RESULT_END__
+      __UPIQAL_RESULT_END__
 
   so the parent can separate it from the mixed progress lines.
-* On any error, child writes "__UPIQLO_ERROR__\\n<message>\\n" on stderr
+* On any error, child writes "__UPIQAL_ERROR__\\n<message>\\n" on stderr
   and exits with a non-zero code.
 """
 
@@ -35,12 +35,12 @@ from .params import CompareParams
 from .pipeline import _HEATMAP_FILES, _build_args, _score_label_fallback, _setup_upstream
 
 
-RESULT_START = "__UPIQLO_RESULT_START__"
-RESULT_END = "__UPIQLO_RESULT_END__"
+RESULT_START = "__UPIQAL_RESULT_START__"
+RESULT_END = "__UPIQAL_RESULT_END__"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="upiqlo_engine.subworker")
+    parser = argparse.ArgumentParser(prog="upiqal_engine.subworker")
     parser.add_argument("--reference", required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--params-json", required=True)
@@ -59,11 +59,11 @@ def main() -> None:
         _setup_upstream()
         import upiqal_cli  # type: ignore[import-not-found]
     except Exception as e:
-        sys.stderr.write(f"__UPIQLO_ERROR__\n{e}\n")
+        sys.stderr.write(f"__UPIQAL_ERROR__\n{e}\n")
         sys.exit(2)
 
     try:
-        with tempfile.TemporaryDirectory(prefix="upiqlo_sub_") as td:
+        with tempfile.TemporaryDirectory(prefix="upiqal_sub_") as td:
             out_dir = Path(td)
             ns = _build_args(args.reference, args.target, out_dir, params)
             # Let upstream print its [N/M] lines directly to stdout.
@@ -77,7 +77,7 @@ def main() -> None:
 
             # Post-process: grayscale-background + colour-highlighted anomaly.
             try:
-                from upiqlo_engine.anomaly_highlight import generate_highlight
+                from upiqal_engine.anomaly_highlight import generate_highlight
 
                 generate_highlight(
                     target_path=Path(args.target),
@@ -120,7 +120,7 @@ def main() -> None:
         sys.stdout.flush()
 
     except Exception as e:
-        sys.stderr.write(f"__UPIQLO_ERROR__\n{e}\n")
+        sys.stderr.write(f"__UPIQAL_ERROR__\n{e}\n")
         sys.exit(1)
 
 

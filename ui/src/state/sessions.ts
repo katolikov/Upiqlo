@@ -116,7 +116,7 @@ function uid(): string {
   return `sess_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-const RECENTS_KEY = "upiqlo.recents.v1";
+const RECENTS_KEY = "upiqal.recents.v1";
 const RECENTS_MAX = 12;
 
 function loadRecents(): RecentEntry[] {

@@ -173,7 +173,7 @@ function drawFooter(
   ctx.fillStyle = "#6a625a";
   ctx.font = `${labelSize}px system-ui, sans-serif`;
   ctx.fillText(
-    "Upiqlo · FR-IQA",
+    "Upiqal · FR-IQA",
     x,
     y0 + padY + labelSize + valueSize + labelSize + 16,
   );

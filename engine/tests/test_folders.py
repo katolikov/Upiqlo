@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from upiqlo_engine.folders import scan
+from upiqal_engine.folders import scan
 
 
 def test_scan_filename_mode_pairs_by_stem(folder_pair_dirs: tuple[Path, Path]) -> None:

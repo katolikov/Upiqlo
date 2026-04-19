@@ -104,11 +104,11 @@ export function SettingsModal({ open, onClose }: Props) {
                 <div className="flex items-center gap-2">
                   <img
                     src="/logo.png"
-                    alt="Upiqlo"
+                    alt="Upiqal"
                     className="h-7 w-auto select-none"
                     draggable={false}
                   />
-                  <span className="text-text font-medium">Upiqlo</span>
+                  <span className="text-text font-medium">Upiqal</span>
                 </div>
                 <span className="tabular-nums">v0.5.12</span>
               </div>

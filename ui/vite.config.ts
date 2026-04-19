@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
-// Upiqlo UI is always served inside a Tauri webview in production. During
+// Upiqal UI is always served inside a Tauri webview in production. During
 // development (`npm run dev`) Vite runs on 5173 and Tauri connects to it.
 export default defineConfig({
   plugins: [react()],

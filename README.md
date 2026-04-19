@@ -1,4 +1,4 @@
-# Upiqlo
+# Upiqal
 
 A **native cross-platform desktop app** for interactive image quality comparison,
 built on top of the [FR-IQA-Algo (UPIQAL)](../FR-IQA-Algo) full-reference image-
@@ -31,8 +31,8 @@ Supported targets: Windows x86_64, Linux x86_64 + aarch64, macOS aarch64.
  │  ─ spawns the engine sidecar ↓     │
  └──┬─────────────────────────────────┘
     │ stdout handshake:
-    │   UPIQLO_ENGINE_PORT=<random>
-    │   UPIQLO_ENGINE_TOKEN=<secret>
+    │   UPIQAL_ENGINE_PORT=<random>
+    │   UPIQAL_ENGINE_TOKEN=<secret>
     ▼
  ┌────────────────────────────────────┐       ┌─────────────────────────────┐
  │  Python engine (PyInstaller)       │◄─────►│  React + Vite + Tailwind    │
@@ -47,7 +47,7 @@ Supported targets: Windows x86_64, Linux x86_64 + aarch64, macOS aarch64.
   The webview renders the UI; nothing ever opens in the user's browser.
 * **Python engine** runs a local FastAPI on `127.0.0.1:<random-port>`, guarded by
   a per-launch bearer token that only the Tauri host knows. On every comparison,
-  the engine spawns a child process (`upiqlo_engine.subworker`) so it can SIGKILL
+  the engine spawns a child process (`upiqal_engine.subworker`) so it can SIGKILL
   it for instant cancellation.
 * **UI** is a Vite + React + TypeScript + Tailwind app. State lives in Zustand.
   Per-session parameter snapshots let each tab have its own `max_side`,
@@ -91,20 +91,20 @@ the bottom dashboard.
 ```bash
 # 1. Build the Python sidecar for the current host
 python engine/scripts/build_sidecar.py
-# → engine/dist/upiqlo-engine-<triple>/   (~928 MB one-dir bundle)
+# → engine/dist/upiqal-engine-<triple>/   (~928 MB one-dir bundle)
 
 # 2. Stage it into src-tauri/binaries/ so Tauri's resource glob picks it up
 mkdir -p src-tauri/binaries
-cp -R engine/dist/upiqlo-engine-<triple> src-tauri/binaries/
+cp -R engine/dist/upiqal-engine-<triple> src-tauri/binaries/
 
 # 3. Build the installer
 npx @tauri-apps/cli@2 build --target <triple>
-# macOS  → src-tauri/target/<triple>/release/bundle/macos/Upiqlo.app  (+ .dmg)
+# macOS  → src-tauri/target/<triple>/release/bundle/macos/Upiqal.app  (+ .dmg)
 # Linux  → src-tauri/target/<triple>/release/bundle/{deb,appimage}/
 # Windows→ src-tauri/target/<triple>/release/bundle/{msi,nsis}/
 ```
 
-Running `Upiqlo.app` (or the equivalent installer output) from a sanitized
+Running `Upiqal.app` (or the equivalent installer output) from a sanitized
 `env -i PATH=/usr/bin:/bin` shell proves the bundle needs no Python, pip,
 uv, or network access — the engine sidecar loads VGG16 from its own
 `_internal/weights/` and serves `/healthz` returning

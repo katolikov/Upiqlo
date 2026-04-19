@@ -2,10 +2,10 @@ import { FileImage, FolderOpen, Images, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSessions, type RecentEntry } from "@/state/sessions";
 import {
-  downloadUpiqloFile,
+  downloadUpiqalFile,
   exportSession,
   importSession,
-  pickUpiqloFile,
+  pickUpiqalFile,
 } from "@/lib/session-io";
 
 /**
@@ -22,7 +22,7 @@ export function StartScreen() {
   const clearRecents = useSessions((s) => s.clearRecents);
 
   const onImport = async () => {
-    const doc = await pickUpiqloFile();
+    const doc = await pickUpiqalFile();
     if (doc) {
       try {
         const sess = importSession(doc);
@@ -36,7 +36,7 @@ export function StartScreen() {
   const onExportCurrent = () => {
     const active = useSessions.getState().getActive();
     if (!active) return;
-    downloadUpiqloFile(exportSession(active), active.title.replace(/\s+/g, "_"));
+    downloadUpiqalFile(exportSession(active), active.title.replace(/\s+/g, "_"));
   };
 
   return (
@@ -45,7 +45,7 @@ export function StartScreen() {
         <div className="text-center">
           <img
             src="/logo.png"
-            alt="Upiqlo"
+            alt="Upiqal"
             className="mx-auto h-20 w-auto select-none"
             draggable={false}
           />
@@ -93,7 +93,7 @@ export function StartScreen() {
           >
             <Upload size={18} className="shrink-0" />
             <div>
-              <div className="text-sm font-medium">Open Session (.upiqlo)</div>
+              <div className="text-sm font-medium">Open Session (.upiqal)</div>
               <div className="text-[11px] text-text-faint">
                 Restore a shared session including params & annotations
               </div>

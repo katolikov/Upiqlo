@@ -1,4 +1,4 @@
-# Upiqlo — How To
+# Upiqal — How To
 
 Step-by-step recipes for the common workflows: first-time setup, the inner
 development loop, running tests, building release installers, and shipping.
@@ -18,21 +18,21 @@ The Tauri CLI is installed automatically via `devDependencies` in the root
 
 ### 1.2 Clone + sibling checkout
 
-Upiqlo expects the algorithm repo to live in a sibling directory:
+Upiqal expects the algorithm repo to live in a sibling directory:
 
 ```bash
 cd ~/DEV
-git clone git@github.com:<owner>/Upiqlo.git
+git clone git@github.com:<owner>/Upiqal.git
 git clone git@github.com:<owner>/FR-IQA-Algo.git
 ls
 #  FR-IQA-Algo/   ← algorithm (imported + vendored)
-#  Upiqlo/        ← this repo
+#  Upiqal/        ← this repo
 ```
 
 ### 1.3 Install JS + Python deps
 
 ```bash
-cd Upiqlo
+cd Upiqal
 npm install                          # root + ui workspace (Tauri CLI too)
 ./scripts/setup-engine.sh            # engine venv w/ Python 3.11 + CPU torch
 ```
@@ -70,8 +70,8 @@ Useful for quick React edits with hot-reload:
 ./scripts/dev-engine.sh              # prints both the PORT and TOKEN
 
 # Terminal 2
-VITE_UPIQLO_ENGINE_PORT=51017 \
-VITE_UPIQLO_ENGINE_TOKEN="<token from terminal 1>" \
+VITE_UPIQAL_ENGINE_PORT=51017 \
+VITE_UPIQAL_ENGINE_TOKEN="<token from terminal 1>" \
 npm --prefix ui run dev
 # → http://127.0.0.1:5173/
 ```
@@ -88,7 +88,7 @@ cd engine
 .venv/bin/python -m pytest tests/test_streaming.py::test_cancel_kills_subprocess_within_2s -v
 ```
 
-Changes to `upiqlo_engine/*.py` are picked up on the next engine restart. The
+Changes to `upiqal_engine/*.py` are picked up on the next engine restart. The
 upstream algorithm is imported via `sys.path.insert(0, "vendor")` — if you
 change `../FR-IQA-Algo/upiqal/*.py`, re-run `engine/scripts/vendor_algorithm.py`.
 
@@ -133,11 +133,11 @@ cd src-tauri && cargo test
 ```bash
 cd engine
 .venv/bin/python scripts/build_sidecar.py
-# → dist/upiqlo-engine-<rust-target-triple>/
+# → dist/upiqal-engine-<rust-target-triple>/
 ```
 
 The output is a PyInstaller **one-dir** bundle (~928 MB on macOS aarch64):
-* `<bundle>/upiqlo-engine` (entry point — also dispatches the `__subworker__`
+* `<bundle>/upiqal-engine` (entry point — also dispatches the `__subworker__`
   re-exec).
 * `<bundle>/_internal/` with `upiqal/`, `upiqal_cli.py`, `weights/`, and the
   torch runtime DLLs.
@@ -146,9 +146,9 @@ You can smoke-test the sidecar directly (no Tauri required):
 
 ```bash
 env -i PATH=/usr/bin:/bin HOME="$HOME" \
-  UPIQLO_ENGINE_PORT_OVERRIDE=51200 \
-  UPIQLO_ENGINE_TOKEN_OVERRIDE="smoke-token" \
-  engine/dist/upiqlo-engine-<triple>/upiqlo-engine &
+  UPIQAL_ENGINE_PORT_OVERRIDE=51200 \
+  UPIQAL_ENGINE_TOKEN_OVERRIDE="smoke-token" \
+  engine/dist/upiqal-engine-<triple>/upiqal-engine &
 
 curl http://127.0.0.1:51200/healthz
 # → {"status":"ok","version":"0.1.0","algorithm_available":true}
@@ -158,7 +158,7 @@ curl http://127.0.0.1:51200/healthz
 
 ```bash
 mkdir -p src-tauri/binaries
-cp -R engine/dist/upiqlo-engine-<triple> src-tauri/binaries/
+cp -R engine/dist/upiqal-engine-<triple> src-tauri/binaries/
 
 npx @tauri-apps/cli@2 build --target <triple>
 ```
@@ -167,20 +167,20 @@ Artifacts land under `src-tauri/target/<triple>/release/bundle/`:
 
 | Platform     | Files                                              |
 |--------------|----------------------------------------------------|
-| macOS aarch64| `macos/Upiqlo.app` + `dmg/Upiqlo_*.dmg`            |
-| Windows x64  | `msi/Upiqlo_*.msi` + `nsis/Upiqlo_*-setup.exe`     |
-| Linux x64/arm| `deb/upiqlo_*.deb` + `appimage/Upiqlo_*.AppImage`  |
+| macOS aarch64| `macos/Upiqal.app` + `dmg/Upiqal_*.dmg`            |
+| Windows x64  | `msi/Upiqal_*.msi` + `nsis/Upiqal_*-setup.exe`     |
+| Linux x64/arm| `deb/upiqal_*.deb` + `appimage/Upiqal_*.AppImage`  |
 
 ### 4.3 Verify the installer is truly self-contained
 
 ```bash
 # macOS:
 env -i PATH=/usr/bin:/bin HOME="$HOME" \
-  src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Upiqlo.app/Contents/MacOS/upiqlo &
+  src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Upiqal.app/Contents/MacOS/upiqal &
 
 sleep 10
-lsof -iTCP -sTCP:LISTEN -a -c upiqlo-engine
-# → upiqlo-engine  <pid>  ...  TCP localhost:<port> (LISTEN)
+lsof -iTCP -sTCP:LISTEN -a -c upiqal-engine
+# → upiqal-engine  <pid>  ...  TCP localhost:<port> (LISTEN)
 
 curl http://127.0.0.1:<port>/healthz
 # → {"status":"ok","version":"0.1.0","algorithm_available":true}
@@ -203,34 +203,34 @@ gh workflow run build.yml
 
 The workflow produces artifacts per target:
 
-* `upiqlo-windows-x86_64` — Windows installers.
-* `upiqlo-linux-x86_64` / `upiqlo-linux-aarch64` — Linux installers.
-* `upiqlo-macos-aarch64` — macOS `.app` + `.dmg`.
+* `upiqal-windows-x86_64` — Windows installers.
+* `upiqal-linux-x86_64` / `upiqal-linux-aarch64` — Linux installers.
+* `upiqal-macos-aarch64` — macOS `.app` + `.dmg`.
 
 ## 6. Troubleshooting
 
 | Symptom                                       | Likely cause                                                         | Fix |
 |-----------------------------------------------|----------------------------------------------------------------------|-----|
-| TopBar chip: "Engine offline"                 | Engine binary missing or wrong port                                  | Check `engine/dist/`, rerun `build_sidecar.py`, check `UPIQLO_ENGINE_PORT_OVERRIDE`. |
-| `/api/compare-paths` returns `401`            | Missing or wrong bearer token                                        | UI: ensure `VITE_UPIQLO_ENGINE_TOKEN` matches engine's token. curl: `-H "Authorization: Bearer <token>"`. |
+| TopBar chip: "Engine offline"                 | Engine binary missing or wrong port                                  | Check `engine/dist/`, rerun `build_sidecar.py`, check `UPIQAL_ENGINE_PORT_OVERRIDE`. |
+| `/api/compare-paths` returns `401`            | Missing or wrong bearer token                                        | UI: ensure `VITE_UPIQAL_ENGINE_TOKEN` matches engine's token. curl: `-H "Authorization: Bearer <token>"`. |
 | "upiqal_cli.py not found"                     | `engine/vendor/` is stale after upstream changes                     | Rerun `engine/scripts/vendor_algorithm.py`. |
-| PyInstaller `ImportError: attempted relative import` | `upiqlo_engine/__main__.py` used relative imports               | Already fixed — absolute imports only. |
-| Tauri build fails with "failed to open icon"  | `src-tauri/icons/` missing                                           | Icons are generated during setup; regenerate via `cargo tauri icon docs/branding/upiqlo-icon-1024.png` (or use the scripted PIL generator in commit history). |
-| DMG creation fails on macOS (hdiutil)         | No developer signing identity; not blocking                          | The `.app` itself is complete at `bundle/macos/Upiqlo.app`. For distribution, codesign + notarize separately. |
+| PyInstaller `ImportError: attempted relative import` | `upiqal_engine/__main__.py` used relative imports               | Already fixed — absolute imports only. |
+| Tauri build fails with "failed to open icon"  | `src-tauri/icons/` missing                                           | Icons are generated during setup; regenerate via `cargo tauri icon docs/branding/upiqal-icon-1024.png` (or use the scripted PIL generator in commit history). |
+| DMG creation fails on macOS (hdiutil)         | No developer signing identity; not blocking                          | The `.app` itself is complete at `bundle/macos/Upiqal.app`. For distribution, codesign + notarize separately. |
 
 ## 7. Architecture cheatsheet
 
 * **UI never blocks**: every long-running call streams via SSE over `fetch`;
   the React state is updated per stage event.
 * **True cancellation**: each streamed run is a child `python -m
-  upiqlo_engine.subworker` (or the PyInstaller bundle's `__subworker__`
+  upiqal_engine.subworker` (or the PyInstaller bundle's `__subworker__`
   re-exec). `DELETE /api/compare/:token` calls `process.kill()` → SIGKILL →
   torch tensors and allocator arenas are reclaimed by the kernel within
   ≲ 1 s. No cooperation with C++ torch internals required.
 * **Per-session parameters**: the TopBar writes to the active tab's snapshot,
   not to globals. New tabs snapshot current globals at `openSession`.
-* **Bearer token handshake**: engine prints `UPIQLO_ENGINE_TOKEN=<token>`
-  after `UPIQLO_ENGINE_PORT`; Tauri's Rust host parses both and exposes
+* **Bearer token handshake**: engine prints `UPIQAL_ENGINE_TOKEN=<token>`
+  after `UPIQAL_ENGINE_PORT`; Tauri's Rust host parses both and exposes
   `get_engine_port` / `get_engine_token` as Tauri commands.
 * **Offline-safe**: no Google Fonts, no CDN, no pip-install-at-runtime, no
   telemetry. The installer contains everything the engine needs.

@@ -1,4 +1,4 @@
-# Upiqlo build notes
+# Upiqal build notes
 
 ## Targets
 
@@ -16,9 +16,9 @@
 3. Run `python engine/scripts/vendor_algorithm.py` (copies `upiqal/` + `weights/`
    from a checkout of `FR-IQA-Algo` done in a previous matrix step).
 4. Run `python engine/scripts/build_sidecar.py --target <triple>` which:
-   - invokes PyInstaller on `upiqlo-engine.spec`
-   - renames `dist/upiqlo-engine/` → `dist/upiqlo-engine-<triple>/`
-5. Copy `engine/dist/upiqlo-engine-<triple>` into `src-tauri/binaries/`.
+   - invokes PyInstaller on `upiqal-engine.spec`
+   - renames `dist/upiqal-engine/` → `dist/upiqal-engine-<triple>/`
+5. Copy `engine/dist/upiqal-engine-<triple>` into `src-tauri/binaries/`.
 6. `npm ci` at the root.
 7. `cargo tauri build`.
 8. Upload the resulting `.exe`, `.msi`, `.dmg`, `.AppImage`, `.deb` to artifacts.
@@ -29,7 +29,7 @@
 - `uvicorn` needs `uvicorn.lifespan.on`, `uvicorn.loops.*`, `uvicorn.protocols.*`
   which the spec pulls via `collect_submodules("uvicorn")`.
 - Weights are included as `datas`; they live under `sys._MEIPASS/weights/` at
-  runtime. `engine/upiqlo_engine/server.py` will resolve them via
+  runtime. `engine/upiqal_engine/server.py` will resolve them via
   `Path(sys._MEIPASS) / "weights"` in Phase 2.
 - CPU torch wheels for Linux aarch64 are only published for recent releases.
   We pin `torch<2.5` to avoid drifting past supported wheel matrices.

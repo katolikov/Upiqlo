@@ -208,7 +208,7 @@ _HEATMAP_FILES = [
     # Unified diagnostic overlay — all artefact channels on one image.
     "diagnostic_overlay.png",
     # Grayscale-background + colour-highlighted anomaly, produced by
-    # upiqlo_engine.anomaly_highlight after the upstream pipeline finishes.
+    # upiqal_engine.anomaly_highlight after the upstream pipeline finishes.
     "anomaly_highlight.png",
 ]
 
@@ -224,7 +224,7 @@ def _build_args(
         reference=reference_path,
         target=target_path,
         output_dir=str(output_dir),
-        name="upiqlo",
+        name="upiqal",
         max_side=params.max_side,
         score_mode=params.score_mode,
         pyramid=params.pyramid,
@@ -322,7 +322,7 @@ def run_compare(
     if not tgt.is_file():
         raise FileNotFoundError(f"target not found: {tgt}")
 
-    with tempfile.TemporaryDirectory(prefix="upiqlo_run_") as td:
+    with tempfile.TemporaryDirectory(prefix="upiqal_run_") as td:
         out_dir = Path(td)
         args = _build_args(str(ref), str(tgt), out_dir, params)
         _call_run_pipeline(args, stage_callback=stage_callback)
@@ -336,7 +336,7 @@ def run_compare(
 
         # Derive the grayscale-background + colour-highlighted anomaly.
         # Absolute import so this also resolves inside the PyInstaller bundle.
-        from upiqlo_engine.anomaly_highlight import generate_highlight
+        from upiqal_engine.anomaly_highlight import generate_highlight
 
         try:
             generate_highlight(

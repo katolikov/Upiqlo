@@ -22,8 +22,8 @@ import pytest
 import uvicorn
 from PIL import Image
 
-from upiqlo_engine.cache import cache
-from upiqlo_engine.server import create_app
+from upiqal_engine.cache import cache
+from upiqal_engine.server import create_app
 
 TOKEN = "integration-token-4c1df2"
 
@@ -73,7 +73,7 @@ class _LiveServer:
 
 @pytest.fixture
 def live(monkeypatch: pytest.MonkeyPatch) -> _LiveServer:
-    monkeypatch.setenv("UPIQLO_ENGINE_TOKEN", TOKEN)
+    monkeypatch.setenv("UPIQAL_ENGINE_TOKEN", TOKEN)
     cache.clear()
     s = _LiveServer()
     s.start()

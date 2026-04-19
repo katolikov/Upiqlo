@@ -11,14 +11,14 @@ if [[ ! -d .venv ]]; then
   exit 1
 fi
 
-export UPIQLO_ENGINE_PORT_OVERRIDE="${UPIQLO_ENGINE_PORT_OVERRIDE:-51017}"
-if [[ -z "${UPIQLO_ENGINE_TOKEN_OVERRIDE:-}" ]]; then
-  UPIQLO_ENGINE_TOKEN_OVERRIDE=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-  export UPIQLO_ENGINE_TOKEN_OVERRIDE
+export UPIQAL_ENGINE_PORT_OVERRIDE="${UPIQAL_ENGINE_PORT_OVERRIDE:-51017}"
+if [[ -z "${UPIQAL_ENGINE_TOKEN_OVERRIDE:-}" ]]; then
+  UPIQAL_ENGINE_TOKEN_OVERRIDE=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+  export UPIQAL_ENGINE_TOKEN_OVERRIDE
 fi
 
-echo "[dev-engine.sh] port=$UPIQLO_ENGINE_PORT_OVERRIDE"
-echo "[dev-engine.sh] token=$UPIQLO_ENGINE_TOKEN_OVERRIDE"
-echo "[dev-engine.sh] export VITE_UPIQLO_ENGINE_PORT / TOKEN for vite"
+echo "[dev-engine.sh] port=$UPIQAL_ENGINE_PORT_OVERRIDE"
+echo "[dev-engine.sh] token=$UPIQAL_ENGINE_TOKEN_OVERRIDE"
+echo "[dev-engine.sh] export VITE_UPIQAL_ENGINE_PORT / TOKEN for vite"
 
-exec .venv/bin/python -m upiqlo_engine
+exec .venv/bin/python -m upiqal_engine

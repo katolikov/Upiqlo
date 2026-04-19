@@ -14,16 +14,16 @@ if [[ ! -d engine/.venv ]]; then
 fi
 
 # Port + token are generated fresh per dev session unless already set.
-export UPIQLO_ENGINE_PORT_OVERRIDE="${UPIQLO_ENGINE_PORT_OVERRIDE:-51017}"
-if [[ -z "${UPIQLO_ENGINE_TOKEN_OVERRIDE:-}" ]]; then
-  UPIQLO_ENGINE_TOKEN_OVERRIDE=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-  export UPIQLO_ENGINE_TOKEN_OVERRIDE
+export UPIQAL_ENGINE_PORT_OVERRIDE="${UPIQAL_ENGINE_PORT_OVERRIDE:-51017}"
+if [[ -z "${UPIQAL_ENGINE_TOKEN_OVERRIDE:-}" ]]; then
+  UPIQAL_ENGINE_TOKEN_OVERRIDE=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+  export UPIQAL_ENGINE_TOKEN_OVERRIDE
 fi
 
 # Vite reads these at dev-server start so the browser UI can authenticate
 # against the engine without going through the (non-existent) Tauri bridge.
-export VITE_UPIQLO_ENGINE_PORT="$UPIQLO_ENGINE_PORT_OVERRIDE"
-export VITE_UPIQLO_ENGINE_TOKEN="$UPIQLO_ENGINE_TOKEN_OVERRIDE"
+export VITE_UPIQAL_ENGINE_PORT="$UPIQAL_ENGINE_PORT_OVERRIDE"
+export VITE_UPIQAL_ENGINE_TOKEN="$UPIQAL_ENGINE_TOKEN_OVERRIDE"
 
 cleanup() {
   echo
@@ -33,8 +33,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "[dev.sh] starting engine on port $UPIQLO_ENGINE_PORT_OVERRIDE"
-(cd engine && .venv/bin/python -m upiqlo_engine) &
+echo "[dev.sh] starting engine on port $UPIQAL_ENGINE_PORT_OVERRIDE"
+(cd engine && .venv/bin/python -m upiqal_engine) &
 ENGINE_PID=$!
 
 echo "[dev.sh] starting tauri dev (spawns vite internally)"

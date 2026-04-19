@@ -1,8 +1,8 @@
 [package]
-name = "upiqlo"
-version = "1.0.0"
-description = "Upiqlo desktop host — FR-IQA image comparison."
-authors = ["Upiqlo"]
+name = "upiqal"
+version = "1.0.1"
+description = "Upiqal desktop host — FR-IQA image comparison."
+authors = ["Upiqal"]
 edition = "2021"
 rust-version = "1.77"
 

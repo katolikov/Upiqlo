@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities needed by the Upiqlo main window.",
+  "description": "Capabilities needed by the Upiqal main window.",
   "windows": ["main"],
   "permissions": [
     "core:default",

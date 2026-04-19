@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Upiqlo",
-  "version": "1.0.0",
-  "identifier": "com.upiqlo.desktop",
+  "productName": "Upiqal",
+  "version": "1.0.1",
+  "identifier": "com.upiqal.desktop",
   "build": {
     "frontendDist": "../ui/dist",
     "devUrl": "http://127.0.0.1:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Upiqlo",
+        "title": "Upiqal",
         "width": 1400,
         "height": 900,
         "minWidth": 1024,
@@ -45,7 +45,7 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "FR-IQA image comparison desktop app",
-    "longDescription": "Upiqlo is a cross-platform desktop application that wraps the UPIQAL full-reference image-quality algorithm for interactive image comparison.",
-    "resources": ["binaries/upiqlo-engine-*/**/*"]
+    "longDescription": "Upiqal is a cross-platform desktop application that wraps the UPIQAL full-reference image-quality algorithm for interactive image comparison.",
+    "resources": ["binaries/upiqal-engine-*/**/*"]
   }
 }

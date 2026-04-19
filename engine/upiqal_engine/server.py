@@ -1,4 +1,4 @@
-"""FastAPI application for the Upiqlo engine.
+"""FastAPI application for the Upiqal engine.
 
 Endpoints
 ---------
@@ -58,7 +58,7 @@ def _algorithm_available() -> bool:
 
 def _expected_token() -> Optional[str]:
     """The token is set as an env var by __main__.py at startup."""
-    return os.environ.get("UPIQLO_ENGINE_TOKEN")
+    return os.environ.get("UPIQAL_ENGINE_TOKEN")
 
 
 async def require_token(
@@ -121,7 +121,7 @@ class FolderCompareRequest(BaseModel):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Upiqlo Engine", version=__version__)
+    app = FastAPI(title="Upiqal Engine", version=__version__)
 
     app.add_middleware(
         CORSMiddleware,
@@ -163,7 +163,7 @@ def create_app() -> FastAPI:
         )
         # Persist uploads to a temp dir so the pipeline can read them as
         # files (upiqal_cli.run_pipeline takes paths, not in-memory buffers).
-        with tempfile.TemporaryDirectory(prefix="upiqlo_upload_") as td:
+        with tempfile.TemporaryDirectory(prefix="upiqal_upload_") as td:
             ref_path = Path(td) / (reference_image.filename or "reference.png")
             tgt_path = Path(td) / (target_image.filename or "target.png")
             ref_path.write_bytes(await reference_image.read())
@@ -293,7 +293,7 @@ def _path_previously_seen(path: str) -> bool:
 # ---------------------------------------------------------------------------
 #
 # Each streamed comparison runs in a **child Python subprocess** spawned via
-# `asyncio.create_subprocess_exec` against `python -m upiqlo_engine.subworker`.
+# `asyncio.create_subprocess_exec` against `python -m upiqal_engine.subworker`.
 # On cancel, DELETE /api/compare/:token looks up the token's process and
 # calls `process.kill()` — SIGKILL instantly frees every torch tensor and
 # C++ allocator arena the child owned. No lingering CPU/GPU load, no
@@ -371,8 +371,8 @@ def _sse(event: str, data: Any) -> str:
 
 
 _STAGE_RE = _re.compile(r"^\s*\[(\d+)/(\d+)\]\s+(.+?)\s+\.\.\.\s+done")
-_RESULT_START = "__UPIQLO_RESULT_START__"
-_RESULT_END = "__UPIQLO_RESULT_END__"
+_RESULT_START = "__UPIQAL_RESULT_START__"
+_RESULT_END = "__UPIQAL_RESULT_END__"
 
 
 async def _stream_compare(
@@ -418,12 +418,12 @@ async def _stream_compare(
         #     re-exec it with a sentinel argv that __main__.py recognises.
         # Absolute import so this also resolves from a PyInstaller bundle
         # where there is no parent package context.
-        from upiqlo_engine.__main__ import SUBWORKER_SENTINEL
+        from upiqal_engine.__main__ import SUBWORKER_SENTINEL
 
         if getattr(sys, "frozen", False):
             argv_prefix = [sys.executable, SUBWORKER_SENTINEL]
         else:
-            argv_prefix = [sys.executable, "-u", "-m", "upiqlo_engine.subworker"]
+            argv_prefix = [sys.executable, "-u", "-m", "upiqal_engine.subworker"]
         proc = await asyncio.create_subprocess_exec(
             *argv_prefix,
             "--reference",

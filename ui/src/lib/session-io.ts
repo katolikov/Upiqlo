@@ -1,6 +1,6 @@
 /**
- * Session Save / Open — serialises an Upiqlo session into a portable JSON
- * document with the `.upiqlo` extension.
+ * Session Save / Open — serialises an Upiqal session into a portable JSON
+ * document with the `.upiqal` extension.
  *
  * The document captures everything needed to recreate the session on a
  * different machine (assuming the image files exist at the same absolute
@@ -17,9 +17,9 @@ import type { Preferences } from "@/state/preferences";
 
 export const SESSION_FILE_VERSION = 1;
 
-export interface UpiqloSessionDocV1 {
+export interface UpiqalSessionDocV1 {
   version: 1;
-  kind: "upiqlo-session";
+  kind: "upiqal-session";
   exportedAt: string; // ISO timestamp
   session: {
     mode: "single" | "folder";
@@ -49,10 +49,10 @@ export interface UpiqloSessionDocV1 {
   };
 }
 
-export function exportSession(s: Session): UpiqloSessionDocV1 {
-  const out: UpiqloSessionDocV1 = {
+export function exportSession(s: Session): UpiqalSessionDocV1 {
+  const out: UpiqalSessionDocV1 = {
     version: 1,
-    kind: "upiqlo-session",
+    kind: "upiqal-session",
     exportedAt: new Date().toISOString(),
     session: {
       mode: s.mode,
@@ -89,8 +89,8 @@ export function exportSession(s: Session): UpiqloSessionDocV1 {
   return out;
 }
 
-export function importSession(doc: UpiqloSessionDocV1): Session {
-  if (doc.version !== 1 || doc.kind !== "upiqlo-session") {
+export function importSession(doc: UpiqalSessionDocV1): Session {
+  if (doc.version !== 1 || doc.kind !== "upiqal-session") {
     throw new Error("Unsupported session-file format");
   }
   const s = doc.session;
@@ -151,15 +151,15 @@ export function importSession(doc: UpiqloSessionDocV1): Session {
   return sess;
 }
 
-/** Browser-side download of a .upiqlo file. */
-export function downloadUpiqloFile(doc: UpiqloSessionDocV1, filename: string) {
+/** Browser-side download of a .upiqal file. */
+export function downloadUpiqalFile(doc: UpiqalSessionDocV1, filename: string) {
   const blob = new Blob([JSON.stringify(doc, null, 2)], {
     type: "application/json",
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename.endsWith(".upiqlo") ? filename : `${filename}.upiqlo`;
+  a.download = filename.endsWith(".upiqal") ? filename : `${filename}.upiqal`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -167,25 +167,25 @@ export function downloadUpiqloFile(doc: UpiqloSessionDocV1, filename: string) {
 }
 
 /**
- * Save a `.upiqlo` session through Tauri's native save dialog so the
+ * Save a `.upiqal` session through Tauri's native save dialog so the
  * user can pick a destination, and return the absolute path that was
  * written. Falls back to the browser-download path when we're not
  * running inside Tauri.
  */
-export async function saveUpiqloFile(
-  doc: UpiqloSessionDocV1,
+export async function saveUpiqalFile(
+  doc: UpiqalSessionDocV1,
   defaultName: string,
 ): Promise<{ path: string | null; filename: string }> {
   const json = JSON.stringify(doc, null, 2);
-  const base = defaultName.endsWith(".upiqlo") ? defaultName : `${defaultName}.upiqlo`;
+  const base = defaultName.endsWith(".upiqal") ? defaultName : `${defaultName}.upiqal`;
   if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
     try {
       const dialog = await import("@tauri-apps/plugin-dialog");
       const fs = await import("@tauri-apps/plugin-fs");
       const path = await dialog.save({
-        title: "Save Upiqlo session",
+        title: "Save Upiqal session",
         defaultPath: base,
-        filters: [{ name: "Upiqlo session", extensions: ["upiqlo"] }],
+        filters: [{ name: "Upiqal session", extensions: ["upiqal"] }],
       });
       if (!path) return { path: null, filename: base };
       await fs.writeTextFile(path, json);
@@ -194,16 +194,16 @@ export async function saveUpiqloFile(
       console.warn("tauri save dialog failed, falling back", err);
     }
   }
-  downloadUpiqloFile(doc, base);
+  downloadUpiqalFile(doc, base);
   return { path: null, filename: base };
 }
 
-/** Triggers a hidden <input type="file"> to read a .upiqlo document. */
-export function pickUpiqloFile(): Promise<UpiqloSessionDocV1 | null> {
+/** Triggers a hidden <input type="file"> to read a .upiqal document. */
+export function pickUpiqalFile(): Promise<UpiqalSessionDocV1 | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".upiqlo,.json,application/json";
+    input.accept = ".upiqal,.json,application/json";
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) {
@@ -214,10 +214,10 @@ export function pickUpiqloFile(): Promise<UpiqloSessionDocV1 | null> {
       reader.onload = () => {
         try {
           const text = reader.result as string;
-          const doc = JSON.parse(text) as UpiqloSessionDocV1;
+          const doc = JSON.parse(text) as UpiqalSessionDocV1;
           resolve(doc);
         } catch (e) {
-          console.error("failed to parse .upiqlo:", e);
+          console.error("failed to parse .upiqal:", e);
           resolve(null);
         }
       };

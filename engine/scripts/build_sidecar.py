@@ -1,6 +1,6 @@
-"""Build the ``upiqlo-engine`` PyInstaller sidecar for the current host.
+"""Build the ``upiqal-engine`` PyInstaller sidecar for the current host.
 
-Produces ``dist/upiqlo-engine-<rust-target-triple>/`` in one-dir mode (the
+Produces ``dist/upiqal-engine-<rust-target-triple>/`` in one-dir mode (the
 whole folder is bundled by Tauri via ``externalBin`` + ``resources``).
 
 Usage:
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 ENGINE_DIR = Path(__file__).resolve().parent.parent
-SPEC_FILE = ENGINE_DIR / "upiqlo-engine.spec"
+SPEC_FILE = ENGINE_DIR / "upiqal-engine.spec"
 
 
 def rustc_host_triple() -> str:
@@ -59,8 +59,8 @@ def build(target: str) -> None:
     )
 
     # 3. Rename one-dir output to Tauri's sidecar convention.
-    src = dist_dir / "upiqlo-engine"
-    dst = dist_dir / f"upiqlo-engine-{target}"
+    src = dist_dir / "upiqal-engine"
+    dst = dist_dir / f"upiqal-engine-{target}"
     if not src.is_dir():
         raise SystemExit(f"Expected PyInstaller output at {src}; not found")
     if dst.exists():

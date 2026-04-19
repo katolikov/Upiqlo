@@ -14,8 +14,8 @@ import { fetchHealth, type HealthResponse } from "@/lib/api";
 import {
   exportSession,
   importSession,
-  pickUpiqloFile,
-  saveUpiqloFile,
+  pickUpiqalFile,
+  saveUpiqalFile,
 } from "@/lib/session-io";
 import { useSessions } from "@/state/sessions";
 import { toast } from "@/state/toast";
@@ -64,7 +64,7 @@ export function TopBar() {
   }, []);
 
   const onImport = async () => {
-    const doc = await pickUpiqloFile();
+    const doc = await pickUpiqalFile();
     if (doc) {
       try {
         const sess = importSession(doc);
@@ -79,7 +79,7 @@ export function TopBar() {
   const onExport = async () => {
     if (!activeSession) return;
     try {
-      const { path, filename } = await saveUpiqloFile(
+      const { path, filename } = await saveUpiqalFile(
         exportSession(activeSession),
         activeSession.title.replace(/\s+/g, "_"),
       );
@@ -105,13 +105,13 @@ export function TopBar() {
         >
           <img
             src="/logo.png"
-            alt="Upiqlo — go to Start"
+            alt="Upiqal — go to Start"
             className="h-6 w-auto select-none"
             draggable={false}
           />
         </button>
         <div className="flex items-baseline gap-2">
-          <h1 className="text-sm font-semibold tracking-wide">Upiqlo</h1>
+          <h1 className="text-sm font-semibold tracking-wide">Upiqal</h1>
           <span className="text-[11px] text-text-faint">FR-IQA Image Comparison</span>
         </div>
 
@@ -132,12 +132,12 @@ export function TopBar() {
 
         <IconButton
           onClick={onImport}
-          label="Open session (.upiqlo)"
+          label="Open session (.upiqal)"
           icon={<Upload size={14} />}
         />
         <IconButton
           onClick={onExport}
-          label={activeSession ? "Save session (.upiqlo)" : "No active session to save"}
+          label={activeSession ? "Save session (.upiqal)" : "No active session to save"}
           disabled={!activeSession}
           icon={<Download size={14} />}
         />

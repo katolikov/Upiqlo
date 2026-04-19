@@ -138,11 +138,11 @@ function drawFooter(
   ctx.font = `bold ${valueSize - 4}px system-ui, sans-serif`;
   ctx.fillText(`${width}×${height}`, x, y0 + padY + labelSize + valueSize);
 
-  // Upiqlo wordmark
+  // Upiqal wordmark
   ctx.fillStyle = "#6a625a";
   ctx.font = `${labelSize}px system-ui, sans-serif`;
   ctx.fillText(
-    "Upiqlo · FR-IQA",
+    "Upiqal · FR-IQA",
     x,
     y0 + padY + labelSize + valueSize + labelSize + 16,
   );
@@ -215,7 +215,7 @@ export function ImageCanvas({
   onDeleteBox,
   drawColor = BOX_COLORS[0],
   onSave,
-  saveFilenameBase = "upiqlo",
+  saveFilenameBase = "upiqal",
   sourcePath = null,
   saveVariant,
   footerReport = null,

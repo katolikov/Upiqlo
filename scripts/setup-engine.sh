@@ -17,13 +17,13 @@ source .venv/bin/activate
 uv pip install -r requirements-dev.txt
 
 # Dev-loop convenience: install the algorithm from the sibling repo.
-ALGO_REPO="${UPIQLO_ALGO_REPO:-$ROOT/../FR-IQA-Algo}"
+ALGO_REPO="${UPIQAL_ALGO_REPO:-$ROOT/../FR-IQA-Algo}"
 if [[ -d "$ALGO_REPO" ]]; then
   echo "Installing upiqal from $ALGO_REPO (editable)"
   uv pip install -e "$ALGO_REPO"
 else
   echo "FR-IQA-Algo repo not found at $ALGO_REPO; skipping editable install."
-  echo "Set UPIQLO_ALGO_REPO=<path> to override."
+  echo "Set UPIQAL_ALGO_REPO=<path> to override."
 fi
 
 echo

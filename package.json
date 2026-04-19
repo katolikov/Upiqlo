@@ -1,18 +1,18 @@
 {
-  "name": "upiqlo",
+  "name": "upiqal",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Cross-platform desktop app wrapping the FR-IQA (UPIQAL) image-quality algorithm.",
   "workspaces": [
     "ui"
   ],
   "scripts": {
     "dev": "bash scripts/dev.sh",
-    "dev:ui": "npm --workspace @upiqlo/ui run dev",
+    "dev:ui": "npm --workspace @upiqal/ui run dev",
     "dev:engine": "bash scripts/dev-engine.sh",
     "tauri:dev": "cargo tauri dev --manifest-path src-tauri/Cargo.toml",
     "tauri:build": "npx tauri build --config src-tauri/tauri.conf.json",
-    "build:ui": "npm --workspace @upiqlo/ui run build",
+    "build:ui": "npm --workspace @upiqal/ui run build",
     "build:sidecar": "bash -c 'if [ -x engine/.venv/bin/python ]; then engine/.venv/bin/python engine/scripts/build_sidecar.py; else python3 engine/scripts/build_sidecar.py; fi'",
     "build:release": "npm run build:sidecar && npm run tauri:build",
     "clean": "bash scripts/clean.sh"

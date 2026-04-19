@@ -1,4 +1,4 @@
-# Pinned runtime deps for the Upiqlo engine sidecar.
+# Pinned runtime deps for the Upiqal engine sidecar.
 # Torch/torchvision are pulled from the CPU-only wheel index to keep installer
 # size sane (~180 MB vs ~2 GB with CUDA runtime).
 #

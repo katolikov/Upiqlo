@@ -20,8 +20,8 @@ import httpx
 import pytest
 import uvicorn
 
-from upiqlo_engine.cache import cache
-from upiqlo_engine.server import create_app
+from upiqal_engine.cache import cache
+from upiqal_engine.server import create_app
 
 
 def _free_port() -> int:

@@ -10,7 +10,7 @@ import { useViewport } from "./state/viewport";
 // e2e tests / manual repro sessions. Stripped from production builds by
 // Vite's dead-code elimination when `import.meta.env.DEV` is false.
 if (import.meta.env.DEV) {
-  (window as unknown as { __UPIQLO__: unknown }).__UPIQLO__ = {
+  (window as unknown as { __UPIQAL__: unknown }).__UPIQAL__ = {
     sessions: useSessions,
     preferences: usePreferences,
     viewport: useViewport,

@@ -1,10 +1,10 @@
-//! Manage the lifecycle of the Upiqlo Python engine sidecar.
+//! Manage the lifecycle of the Upiqal Python engine sidecar.
 //!
-//! The sidecar is a PyInstaller-built binary (`upiqlo-engine-<triple>`) that
+//! The sidecar is a PyInstaller-built binary (`upiqal-engine-<triple>`) that
 //! prints a two-line handshake on stdout:
 //!
-//!     UPIQLO_ENGINE_PORT=<port>\n
-//!     UPIQLO_ENGINE_TOKEN=<token>\n
+//!     UPIQAL_ENGINE_PORT=<port>\n
+//!     UPIQAL_ENGINE_TOKEN=<token>\n
 //!
 //! We parse both and stash them in `EngineHandle`. The frontend retrieves
 //! them via the `get_engine_port` / `get_engine_token` Tauri commands and
@@ -29,7 +29,7 @@ pub struct EngineHandle {
     pub token: Option<String>,
     /// Retained so we can explicitly `kill()` the sidecar when the
     /// Tauri window closes. Without this, `CommandChild` drops as a
-    /// no-op on Windows and leaves a zombie `upiqlo-engine` process.
+    /// no-op on Windows and leaves a zombie `upiqal-engine` process.
     pub child: Option<tauri_plugin_shell::process::CommandChild>,
 }
 
@@ -52,12 +52,12 @@ impl EngineHandle {
 
 pub async fn spawn_engine(app: &AppHandle) -> Result<()> {
     let exe = resolve_sidecar_executable(app)?;
-    log::info!("Spawning Upiqlo engine sidecar: {}", exe.display());
+    log::info!("Spawning Upiqal engine sidecar: {}", exe.display());
 
     // Use the shell plugin's `command()` (platform-agnostic launcher) so the
     // same stdout/stderr stream plumbing works as with a named sidecar.
     let cmd = app.shell().command(exe.to_string_lossy().to_string());
-    let (mut rx, child) = cmd.spawn().context("spawning upiqlo-engine sidecar")?;
+    let (mut rx, child) = cmd.spawn().context("spawning upiqal-engine sidecar")?;
 
     // Stash the child handle so we can kill it on window close.
     if let Some(state) = app.try_state::<AppState>() {
@@ -123,11 +123,11 @@ pub async fn spawn_engine(app: &AppHandle) -> Result<()> {
 ///   * Windows/Linux: next to the executable, under resources/
 /// Tauri's `path_resolver().resolve_resource(...)` abstracts that away.
 fn resolve_sidecar_executable(app: &AppHandle) -> Result<PathBuf> {
-    let folder_name = format!("upiqlo-engine-{TARGET_TRIPLE}");
+    let folder_name = format!("upiqal-engine-{TARGET_TRIPLE}");
     let bin_name = if cfg!(target_os = "windows") {
-        "upiqlo-engine.exe"
+        "upiqal-engine.exe"
     } else {
-        "upiqlo-engine"
+        "upiqal-engine"
     };
     let relative = format!("binaries/{folder_name}/{bin_name}");
 
@@ -146,7 +146,7 @@ fn resolve_sidecar_executable(app: &AppHandle) -> Result<PathBuf> {
     }
 
     Err(anyhow!(
-        "upiqlo-engine sidecar not found. Expected at Resource/{relative} \
+        "upiqal-engine sidecar not found. Expected at Resource/{relative} \
          (production) or {} (dev). Run `python engine/scripts/build_sidecar.py` \
          and stage into src-tauri/binaries/.",
         dev.display()
@@ -154,12 +154,12 @@ fn resolve_sidecar_executable(app: &AppHandle) -> Result<PathBuf> {
 }
 
 fn parse_port_line(line: &str) -> Option<u16> {
-    const PREFIX: &str = "UPIQLO_ENGINE_PORT=";
+    const PREFIX: &str = "UPIQAL_ENGINE_PORT=";
     line.strip_prefix(PREFIX).and_then(|s| s.parse::<u16>().ok())
 }
 
 fn parse_token_line(line: &str) -> Option<String> {
-    const PREFIX: &str = "UPIQLO_ENGINE_TOKEN=";
+    const PREFIX: &str = "UPIQAL_ENGINE_TOKEN=";
     line.strip_prefix(PREFIX)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -186,27 +186,27 @@ mod tests {
 
     #[test]
     fn parses_valid_port() {
-        assert_eq!(parse_port_line("UPIQLO_ENGINE_PORT=51017"), Some(51017));
+        assert_eq!(parse_port_line("UPIQAL_ENGINE_PORT=51017"), Some(51017));
     }
 
     #[test]
     fn rejects_port_garbage() {
         assert_eq!(parse_port_line("hello world"), None);
-        assert_eq!(parse_port_line("UPIQLO_ENGINE_PORT="), None);
-        assert_eq!(parse_port_line("UPIQLO_ENGINE_PORT=not-a-number"), None);
+        assert_eq!(parse_port_line("UPIQAL_ENGINE_PORT="), None);
+        assert_eq!(parse_port_line("UPIQAL_ENGINE_PORT=not-a-number"), None);
     }
 
     #[test]
     fn parses_valid_token() {
         assert_eq!(
-            parse_token_line("UPIQLO_ENGINE_TOKEN=abc123_xyz"),
+            parse_token_line("UPIQAL_ENGINE_TOKEN=abc123_xyz"),
             Some("abc123_xyz".to_string())
         );
     }
 
     #[test]
     fn rejects_token_garbage() {
-        assert_eq!(parse_token_line("UPIQLO_ENGINE_TOKEN="), None);
+        assert_eq!(parse_token_line("UPIQAL_ENGINE_TOKEN="), None);
         assert_eq!(parse_token_line("unrelated"), None);
     }
 }

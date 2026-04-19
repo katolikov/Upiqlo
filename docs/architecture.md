@@ -1,4 +1,4 @@
-# Upiqlo Architecture
+# Upiqal Architecture
 
 See [../README.md](../README.md) for the overview and the approved plan at
 `/Users/artemkatolikov/.claude/plans/atomic-fluttering-manatee.md` for the
@@ -18,7 +18,7 @@ full design rationale.
 The sidecar prints exactly one line before serving:
 
 ```
-UPIQLO_ENGINE_PORT=51017
+UPIQAL_ENGINE_PORT=51017
 ```
 
 The Rust host reads this on stdout, stores the port in `AppState::engine`,
@@ -28,7 +28,7 @@ All later output is routed to the Rust log (stderr-prefixed with
 
 ## Why not HTTP-discovery via a well-known port?
 
-- Multiple Upiqlo windows would collide.
+- Multiple Upiqal windows would collide.
 - Antivirus sometimes blocks fixed high ports on Windows.
 - `socket(0)` lets the OS pick a known-free port deterministically.
 
@@ -45,6 +45,6 @@ and disappears when the app exits.
 Release builds use PyInstaller's **one-dir** mode (not one-file) to avoid
 torch's extract-on-every-launch penalty. Tauri's `externalBin` convention
 requires the sidecar binary to be named
-`upiqlo-engine-<rust-target-triple>(.exe)`, so
+`upiqal-engine-<rust-target-triple>(.exe)`, so
 `engine/scripts/build_sidecar.py` renames the PyInstaller output folder
 accordingly.

@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from upiqlo_engine.cache import cache
-from upiqlo_engine.server import create_app
+from upiqal_engine.cache import cache
+from upiqal_engine.server import create_app
 
 
 @pytest.fixture(autouse=True)

@@ -1,7 +1,7 @@
 /**
  * Image-format metadata shared between the UI and the engine.
  *
- * Keep in sync with `engine/upiqlo_engine/folders.py::IMAGE_EXTS` and
+ * Keep in sync with `engine/upiqal_engine/folders.py::IMAGE_EXTS` and
  * the upstream algorithm's `_PIXEL_FORMATS` (NV21 / NV12 / GRAY8 / RGB888).
  */
 

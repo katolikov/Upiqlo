@@ -1,7 +1,7 @@
 """Bearer-token auth tests.
 
 These tests exercise the real require_token dependency with a real token
-configured through the UPIQLO_ENGINE_TOKEN env var — no mocks.
+configured through the UPIQAL_ENGINE_TOKEN env var — no mocks.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from upiqlo_engine.cache import cache
-from upiqlo_engine.server import create_app
+from upiqal_engine.cache import cache
+from upiqal_engine.server import create_app
 
 
 TOKEN = "test-token-abcdef0123456789"
@@ -21,7 +21,7 @@ TOKEN = "test-token-abcdef0123456789"
 
 @pytest.fixture(autouse=True)
 def _with_token(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("UPIQLO_ENGINE_TOKEN", TOKEN)
+    monkeypatch.setenv("UPIQAL_ENGINE_TOKEN", TOKEN)
     cache.clear()
     yield
     cache.clear()

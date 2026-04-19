@@ -1,7 +1,7 @@
-# PyInstaller spec for the Upiqlo engine sidecar.
+# PyInstaller spec for the Upiqal engine sidecar.
 #
-# Produces a one-dir build at `dist/upiqlo-engine/`. The outer
-# `scripts/build_sidecar.py` renames that to `upiqlo-engine-<target-triple>`
+# Produces a one-dir build at `dist/upiqal-engine/`. The outer
+# `scripts/build_sidecar.py` renames that to `upiqal-engine-<target-triple>`
 # so Tauri's `externalBin` picks it up on every platform.
 #
 # NOTE: run from the `engine/` directory so relative paths resolve.
@@ -35,7 +35,7 @@ datas += collect_data_files("torchvision")
 
 
 a = Analysis(
-    ["upiqlo_engine/__main__.py"],
+    ["upiqal_engine/__main__.py"],
     pathex=["vendor"],
     binaries=[],
     datas=datas,
@@ -56,7 +56,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="upiqlo-engine",
+    name="upiqal-engine",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -72,5 +72,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="upiqlo-engine",
+    name="upiqal-engine",
 )

@@ -55,7 +55,7 @@ fn main() {
             commands::ping,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Upiqlo")
+        .expect("error while building Upiqal")
         .run(|app, event| {
             // Last-line defence: kill the sidecar on the global Exit
             // event (covers cmd+Q and other exit paths the window

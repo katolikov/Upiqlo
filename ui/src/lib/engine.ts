@@ -1,10 +1,10 @@
 /**
- * Tauri-side IPC helpers for discovering the Upiqlo engine port + token.
+ * Tauri-side IPC helpers for discovering the Upiqal engine port + token.
  *
  * In production (Tauri), the Rust host reads the two-line handshake from
  * the sidecar and exposes it via the `get_engine_port` / `get_engine_token`
  * commands. In dev (`npm run dev` without Tauri), we fall back to
- * VITE_UPIQLO_ENGINE_PORT / VITE_UPIQLO_ENGINE_TOKEN injected by dev.sh.
+ * VITE_UPIQAL_ENGINE_PORT / VITE_UPIQAL_ENGINE_TOKEN injected by dev.sh.
  */
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -36,7 +36,7 @@ export async function getEnginePort(): Promise<number> {
       console.warn("get_engine_port via Tauri failed, falling back:", err);
     }
   }
-  const fromEnv = viteEnv().VITE_UPIQLO_ENGINE_PORT;
+  const fromEnv = viteEnv().VITE_UPIQAL_ENGINE_PORT;
   _cachedPort = fromEnv ? Number(fromEnv) : 51017;
   return _cachedPort;
 }
@@ -52,7 +52,7 @@ export async function getEngineToken(): Promise<string | null> {
       console.warn("get_engine_token via Tauri failed, falling back:", err);
     }
   }
-  const fromEnv = viteEnv().VITE_UPIQLO_ENGINE_TOKEN;
+  const fromEnv = viteEnv().VITE_UPIQAL_ENGINE_TOKEN;
   if (fromEnv) {
     _cachedToken = fromEnv;
     return _cachedToken;

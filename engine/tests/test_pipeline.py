@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from upiqlo_engine.params import CompareParams
-from upiqlo_engine.pipeline import run_compare
+from upiqal_engine.params import CompareParams
+from upiqal_engine.pipeline import run_compare
 
 
 def test_run_compare_diff_pair(image_pair: tuple[Path, Path]) -> None:
@@ -36,7 +36,7 @@ def test_run_compare_diff_pair(image_pair: tuple[Path, Path]) -> None:
         "blur_mask.png",
         "anomaly_overlay.png",
         "diagnostic_overlay.png",
-        "anomaly_highlight.png",  # Upiqlo post-processor
+        "anomaly_highlight.png",  # Upiqal post-processor
     }
     assert expected.issubset(result.heatmaps.keys())
     for name, data in result.heatmaps.items():

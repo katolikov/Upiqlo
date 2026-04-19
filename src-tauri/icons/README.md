@@ -3,7 +3,7 @@
 Generate with:
 
 ```bash
-cargo tauri icon ../docs/branding/upiqlo-icon-1024.png
+cargo tauri icon ../docs/branding/upiqal-icon-1024.png
 ```
 
 Phase 1 ships without real icons. Tauri falls back to defaults during

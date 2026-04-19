@@ -1,4 +1,4 @@
-# GitHub Actions matrix for Upiqlo desktop builds.
+# GitHub Actions matrix for Upiqal desktop builds.
 #
 # Per project policy, this file is committed locally only and is NOT
 # pushed to GitHub unless explicitly enabled. It exists as a ready-to-use
@@ -30,25 +30,25 @@ jobs:
           - name: windows-x86_64
             runner: windows-latest
             rust-target: x86_64-pc-windows-msvc
-            sidecar-exe: upiqlo-engine.exe
+            sidecar-exe: upiqal-engine.exe
           - name: linux-x86_64
             runner: ubuntu-latest
             rust-target: x86_64-unknown-linux-gnu
-            sidecar-exe: upiqlo-engine
+            sidecar-exe: upiqal-engine
           - name: linux-aarch64
             runner: ubuntu-24.04-arm
             rust-target: aarch64-unknown-linux-gnu
-            sidecar-exe: upiqlo-engine
+            sidecar-exe: upiqal-engine
           - name: macos-aarch64
             runner: macos-14
             rust-target: aarch64-apple-darwin
-            sidecar-exe: upiqlo-engine
+            sidecar-exe: upiqal-engine
 
     steps:
-      - name: Checkout Upiqlo
+      - name: Checkout Upiqal
         uses: actions/checkout@v4
         with:
-          path: Upiqlo
+          path: Upiqal
 
       - name: Checkout FR-IQA-Algo (sibling)
         uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: Upiqlo/package-lock.json
+          cache-dependency-path: Upiqal/package-lock.json
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -91,40 +91,40 @@ jobs:
 
       # --- Engine pytest (runs against the real algorithm) -----------------
       - name: Bootstrap engine venv
-        working-directory: Upiqlo/engine
+        working-directory: Upiqal/engine
         shell: bash
         run: |
           uv venv -p 3.11 .venv
           uv pip install --python .venv -r requirements-dev.txt
 
       - name: Vendor algorithm (upiqal + weights + upiqal_cli.py)
-        working-directory: Upiqlo/engine
+        working-directory: Upiqal/engine
         shell: bash
         run: |
           .venv/bin/python scripts/vendor_algorithm.py --algo-repo ../../FR-IQA-Algo
 
       - name: Run engine pytest suite
-        working-directory: Upiqlo/engine
+        working-directory: Upiqal/engine
         shell: bash
         run: |
           .venv/bin/python -m pytest tests -q
 
       # --- PyInstaller sidecar ---------------------------------------------
       - name: Build PyInstaller sidecar
-        working-directory: Upiqlo/engine
+        working-directory: Upiqal/engine
         shell: bash
         run: |
           .venv/bin/python scripts/build_sidecar.py --target ${{ matrix.rust-target }}
 
       - name: Smoke-test bundled sidecar
-        working-directory: Upiqlo/engine
+        working-directory: Upiqal/engine
         shell: bash
         run: |
           set -e
-          SIDECAR_DIR="dist/upiqlo-engine-${{ matrix.rust-target }}"
+          SIDECAR_DIR="dist/upiqal-engine-${{ matrix.rust-target }}"
           EXE="$SIDECAR_DIR/${{ matrix.sidecar-exe }}"
-          UPIQLO_ENGINE_PORT_OVERRIDE=61000 \
-          UPIQLO_ENGINE_TOKEN_OVERRIDE="ci-smoke" \
+          UPIQAL_ENGINE_PORT_OVERRIDE=61000 \
+          UPIQAL_ENGINE_TOKEN_OVERRIDE="ci-smoke" \
             "$EXE" > /tmp/engine.log 2>&1 &
           PID=$!
           for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -138,33 +138,33 @@ jobs:
           cat /tmp/hz | grep '"algorithm_available":true'
 
       - name: Stage sidecar for Tauri
-        working-directory: Upiqlo
+        working-directory: Upiqal
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
-          cp -R engine/dist/upiqlo-engine-${{ matrix.rust-target }} src-tauri/binaries/
+          cp -R engine/dist/upiqal-engine-${{ matrix.rust-target }} src-tauri/binaries/
 
       # --- UI + Tauri -------------------------------------------------------
       - name: Install JS deps
-        working-directory: Upiqlo
+        working-directory: Upiqal
         shell: bash
         run: npm ci
 
       - name: Build UI
-        working-directory: Upiqlo
+        working-directory: Upiqal
         shell: bash
         run: npm run build:ui
 
       - name: Tauri build
-        working-directory: Upiqlo
+        working-directory: Upiqal
         shell: bash
         run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.rust-target }}
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: upiqlo-${{ matrix.name }}
+          name: upiqal-${{ matrix.name }}
           path: |
-            Upiqlo/src-tauri/target/${{ matrix.rust-target }}/release/bundle/**/*
+            Upiqal/src-tauri/target/${{ matrix.rust-target }}/release/bundle/**/*
           if-no-files-found: warn
           retention-days: 14

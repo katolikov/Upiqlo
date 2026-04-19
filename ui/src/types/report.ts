@@ -1,5 +1,5 @@
 /**
- * TypeScript mirror of the response returned by the Upiqlo engine's
+ * TypeScript mirror of the response returned by the Upiqal engine's
  * /api/compare and /api/compare-paths endpoints.
  */
 

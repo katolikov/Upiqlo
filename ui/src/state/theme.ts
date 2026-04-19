@@ -3,7 +3,7 @@ import { create } from "zustand";
 
 export type ThemeMode = "light" | "dark" | "system";
 
-const KEY = "upiqlo.theme.v1";
+const KEY = "upiqal.theme.v1";
 
 function loadTheme(): ThemeMode {
   if (typeof window === "undefined") return "dark";
