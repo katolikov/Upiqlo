@@ -37,6 +37,16 @@ export interface UnifiedLayerSpec {
    * is the blue/low-value region. Setting invert: true flips the
    * strength before the floor check. */
   invert?: boolean;
+  /** Strength extraction mode for chromatic (jet-colourmapped) masks.
+   *   - "any-warm" (default): max(R, G) — any non-deep-blue jet pixel
+   *     (cyan onward) registers as strength. Good for dense maps where
+   *     mid-range values still matter.
+   *   - "warm-only": max(0, R - B) — only true warm pixels (red/orange/
+   *     yellow) register; cyan/green/blue collapse to zero. Use this
+   *     for layers where only the red hot-spot tail of the jet colormap
+   *     should paint (e.g. Structure), matching what the user sees as
+   *     "warm" pixels on the Structure sub-tab. */
+  strengthMode?: "any-warm" | "warm-only";
 }
 
 /**
@@ -53,9 +63,12 @@ export const UNIFIED_LAYERS: UnifiedLayerSpec[] = [
   { key: "gaussian_noise_mask.png",       label: "Noise",       color: "#5F9755", intensity: 0.85, floor: 0.30 },
   { key: "blur_mask.png",                 label: "Blur",        color: "#C58F3B", intensity: 0.85, floor: 0.35 },
   { key: "color_degradation_map.png",     label: "Color shift", color: "#B84A6C", intensity: 0.85, floor: 0.35 },
-  // Structural similarity is HIGH where images agree — the anomaly is
-  // the blue/low-value region, so invert the strength before thresholding.
-  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 0.85, floor: 0.40, invert: true },
+  // Structure: RED in the saved PNG IS the damaged region (CLI uses
+  // save_channel(invert=True)). The default `max(R, G)` strength would
+  // also light up cyan/green — painting magenta on intact regions. Use
+  // "warm-only" so ONLY true red/orange/yellow pixels register; cyan
+  // through blue collapse to zero strength and never clear the floor.
+  { key: "structural_similarity_map.png", label: "Structure",   color: "#7A5BA6", intensity: 0.85, floor: 0.30, strengthMode: "warm-only" },
 ];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -92,6 +105,7 @@ function extractMaskRGBA(
   img: HTMLImageElement,
   w: number,
   h: number,
+  mode: "any-warm" | "warm-only" = "any-warm",
 ): { strength: Uint8Array; rgb: Uint8ClampedArray } {
   const buf = document.createElement("canvas");
   buf.width = w;
@@ -112,9 +126,18 @@ function extractMaskRGBA(
     const spread = Math.max(r, g, b) - Math.min(r, g, b);
     let s: number;
     if (spread >= 40) {
-      // Chromatic: max(R, G) — high for cyan / green / yellow / red,
-      // low only for deep blue (R small AND G small).
-      s = Math.max(r, g);
+      // Chromatic (jet-colourmapped).
+      if (mode === "warm-only") {
+        // max(0, R - B): HIGH only for true warm pixels (red/orange/
+        // yellow). Cyan/green/blue → R - B ≤ 0 → strength 0, below any
+        // positive floor. Used by Structure so magenta paint lands only
+        // on the warm hot-spot tail of the jet colormap.
+        s = Math.max(0, r - b);
+      } else {
+        // "any-warm": max(R, G) — high for cyan / green / yellow / red,
+        // low only for deep blue (R small AND G small).
+        s = Math.max(r, g);
+      }
     } else {
       // Near-grey: binary mask.
       s = Math.max(r, g, b);
@@ -176,7 +199,7 @@ export async function buildUnified({
       if (!b64) continue;
       try {
         const mask = await loadImage(heatmapDataUrl(b64));
-        const { strength, rgb } = extractMaskRGBA(mask, w, h);
+        const { strength, rgb } = extractMaskRGBA(mask, w, h, spec.strengthMode);
         layers.push({ spec, strength, rgb });
       } catch {
         /* unreadable mask → skip */
