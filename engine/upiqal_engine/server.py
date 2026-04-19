@@ -123,12 +123,21 @@ class FolderCompareRequest(BaseModel):
 def create_app() -> FastAPI:
     app = FastAPI(title="Upiqal Engine", version=__version__)
 
+    # Tauri v2 uses different origins per platform for the production
+    # webview: macOS serves from `tauri://localhost`, Windows (WebView2)
+    # serves from `http://tauri.localhost` / `https://tauri.localhost`,
+    # and Linux serves from `http://tauri.localhost` too. Whitelisting
+    # only `tauri://localhost` (the old macOS-only default) makes the
+    # CORS preflight reject every UI→engine fetch on Windows/Linux and
+    # the UI sees "Failed to fetch" + a permanent "Engine offline" chip.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
             "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
         ],
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
