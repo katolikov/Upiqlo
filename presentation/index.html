@@ -845,7 +845,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
       <div class="slides">
 
         <!-- ============================================ -->
-        <!--  1. TITLE                                      -->
+        <!--   1. TITLE                                      -->
         <!-- ============================================ -->
         <section data-transition="fade">
           <div class="title-slide">
@@ -862,7 +862,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  2. ALGO DEEP DIVE — INTRO                    -->
+        <!--   2. ALGO DEEP DIVE — INTRO                    -->
         <!-- ============================================ -->
         <section data-transition="convex">
           <div class="title-slide">
@@ -879,7 +879,41 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  3. MODULE 1 — NORMALIZATION                  -->
+        <!-- INSERTED: INPUTS & OUTPUTS -->
+        <section class="dense">
+          <div class="eyebrow">Algorithm · I/O surface</div>
+          <h2 class="section-title">What goes in, what comes out.</h2>
+
+          <div class="two-col">
+            <div>
+              <h4>Inputs</h4>
+              <ul class="tight">
+                <li><strong>Image pair</strong> — PNG, JPEG, BMP, TIFF, plus raw <code>NV21</code> / <code>NV12</code> / <code>GRAY8</code> / <code>RGB888</code> bytes and <code>.npy</code> arrays. Aspect-preserving Lanczos to max-side.</li>
+                <li><strong>max_side</strong> — longer-side cap (default <code>1024</code>; typical <code>512..2048</code>).</li>
+                <li><strong>feature_side</strong> — Modules 1-4 pyramid level (default <code>256</code>).</li>
+                <li><strong>pyramid</strong> — dual-scale split toggle (default <code>on</code>).</li>
+                <li><strong>score_mode</strong> — <code>sigmoid</code> (legacy, default) or <code>nll</code> (paper).</li>
+                <li><strong>uncertainty_weights</strong> — optional learned Cholesky <code>.pth</code>.</li>
+                <li><strong>aggregation_weights</strong> — optional MOS-tuned overrides for the 6 pipeline weights + A-DISTS sigmoid k/b.</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Outputs</h4>
+              <ul class="tight">
+                <li><strong>score</strong> ∈ <code>[0, 1]</code> + <strong>score_label</strong> — Excellent (≥0.9) · Good (≥0.7) · Moderate (≥0.5) · Poor (≥0.3) · Severe.</li>
+                <li><strong>diagnostics</strong> — <code>dominant_artifact</code>, <code>severity_scores</code> {ringing, noise, color_shift, blur}, <code>affected_area</code> %.</li>
+                <li><strong>7-channel diagnostic tensor</strong> — anomaly · color · structure · blocking · ringing · noise · blur.</li>
+                <li><strong>8 PNG heatmaps</strong> — Unified · Anomaly Overlay · Anomaly Map · Structure · Color · Ringing · Noise · Blur.</li>
+                <li><strong>report.json</strong> — score, diagnostics, image_resolution, timestamp, tool version.</li>
+              </ul>
+              <p class="caption" style="margin-top:14px">
+                Runtime on CPU: ~2 s per pair at <code>feature_side=256</code>, ~8 s at 512, dominated by VGG16 forward + Sinkhorn EMD.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!--   3. MODULE 1 — NORMALIZATION                  -->
         <!-- ============================================ -->
         <section>
           <div class="eyebrow">Compare · 1 / 5</div>
@@ -916,7 +950,47 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  4. MODULE 2 — CHROMATIC TRANSPORT            -->
+        <!-- INSERTED: MULTI-SCALE PYRAMID -->
+        <section>
+          <div class="eyebrow">Algorithm · pyramid</div>
+          <h2 class="section-title">Two scales, one pipeline.</h2>
+
+          <p>The original UPIQAL paper prescribes a 256-pixel feature scale,
+            but blocking grids and edge-locked ringing only exist at native
+            resolution — downsample them and they vanish. So the pipeline
+            splits across two scales:</p>
+
+          <div class="card-grid cols-2">
+            <div class="card">
+              <h4>Feature branch · ~256 px longer side</h4>
+              <p class="lede">
+                Modules 1-4 (normalize · chromatic transport · deep
+                statistics · uncertainty). VGG16 stays fast, A-DISTS sees
+                paper-matched spatial frequencies, Sinkhorn EMD finishes
+                in milliseconds.
+              </p>
+            </div>
+            <div class="card">
+              <h4>Heuristic branch · full resolution</h4>
+              <p class="lede">
+                Module 5 only. JPEG block phase (8-pixel grid) and
+                edge-locked ringing need pixel-perfect alignment, so they
+                read native pixels then downsample masks for aggregation.
+              </p>
+            </div>
+          </div>
+
+          <p class="caption" style="margin-top:18px">
+            Size mismatch between ref and tgt? Downsample the larger one
+            (bicubic + antialias) — <strong>never upsample</strong>.
+            Upsampling silently injected blur into the target and was
+            masking real defects until validation probe T7 caught it
+            (score drift 0.95 → 0.84 on identical-content pairs at
+            mismatched native sizes).
+          </p>
+        </section>
+
+        <!--   4. MODULE 2 — CHROMATIC TRANSPORT            -->
         <!-- ============================================ -->
         <section>
           <div class="eyebrow">Compare · 2 / 5</div>
@@ -946,7 +1020,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  5. MODULE 3 — DEEP STATISTICS (A-DISTS)      -->
+        <!--   5. MODULE 3 — DEEP STATISTICS (A-DISTS)      -->
         <!-- ============================================ -->
         <section class="dense">
           <div class="eyebrow">Compare · 3 / 5</div>
@@ -981,7 +1055,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  6. MODULE 4 — PROBABILISTIC UNCERTAINTY      -->
+        <!--   6. MODULE 4 — PROBABILISTIC UNCERTAINTY      -->
         <!-- ============================================ -->
         <section>
           <div class="eyebrow">Compare · 4 / 5</div>
@@ -1013,7 +1087,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  7. MODULE 5 — SPATIAL HEURISTICS             -->
+        <!--   7. MODULE 5 — SPATIAL HEURISTICS             -->
         <!-- ============================================ -->
         <section>
           <div class="eyebrow">Compare · 5 / 5</div>
@@ -1051,7 +1125,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  8. AGGREGATION → SCORE                        -->
+        <!--   8. AGGREGATION → SCORE                        -->
         <!-- ============================================ -->
         <section class="dense">
           <div class="eyebrow">Aggregation</div>
@@ -1099,7 +1173,62 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           </div>
         </section>
 
-        <!--  9. UNIFIED OVERLAY                            -->
+        <!-- INSERTED: DOMINANT ARTEFACT RANKING -->
+        <section class="dense">
+          <div class="eyebrow">Algorithm · classification</div>
+          <h2 class="section-title">Picking the dominant artefact.</h2>
+
+          <p>The headline label ("Blur / Loss of Detail", "Gibbs Ringing", …)
+            is <em>not</em> a naive argmax over severity numbers — those clip
+            at 100 % and tie often. The pipeline ranks by
+            <strong>contribution to the score drop</strong> and applies a
+            high-frequency-energy discriminator to suppress mislabels.</p>
+
+          <div class="two-col">
+            <div>
+              <h4>Contribution weights</h4>
+              <div class="formula" style="font-size:0.85rem">
+                <span class="var">ringing</span>      &nbsp; × <span class="w">1.00</span>  &nbsp;<span class="op">// high specificity</span><br>
+                <span class="var">noise</span>        &nbsp; × <span class="w">0.30</span><br>
+                <span class="var">color_shift</span>  &nbsp; × <span class="w">0.30</span><br>
+                <span class="var">blur</span>         &nbsp; × <span class="w">0.50</span>
+              </div>
+              <p class="caption">
+                Heuristic detectors (ringing) carry full weight — when they
+                fire, they almost certainly indicate the named artefact.
+                Generic deep-feature signals (noise / colour / blur) overlap
+                so they're weighted down. A "single weak channel &lt; 15 %"
+                guard returns <code>"None"</code> to absorb MPS float-drift
+                on near-identical inputs.
+              </p>
+            </div>
+            <div>
+              <h4>HF-energy discriminator</h4>
+              <p>Laplacian variance on the luminance channel of each image:</p>
+              <div class="formula" style="font-size:0.85rem">
+                ratio = HF(tgt) / HF(ref)
+              </div>
+              <ul class="tight">
+                <li><strong>ratio &gt; 1.10</strong> — target <em>sharper</em>;
+                  kill <code>blur</code> contribution. If noise is &gt; 10 %,
+                  also down-weight <code>color_shift</code> ×0.3 because noise
+                  saturates the Sinkhorn EMD channel.</li>
+                <li><strong>ratio &lt; 0.90</strong> — target <em>smoother</em>;
+                  down-weight <code>noise</code> ×0.3 and <code>ringing</code>
+                  ×0.3 (sharpness is gone, those classes are unlikely).</li>
+                <li><strong>0.90 ≤ ratio ≤ 1.10</strong> — HF stable. If colour
+                  EMD ≥ 25 %, the delta is chromatic; down-weight
+                  <code>blur</code> ×0.3.</li>
+              </ul>
+              <p class="caption">
+                Prevents the classic mislabel: generic deep-similarity drop on
+                unrelated content getting tagged as "Blur".
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!--   9. UNIFIED OVERLAY                            -->
         <!-- ============================================ -->
         <section>
           <div class="eyebrow">Render</div>
