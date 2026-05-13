@@ -892,7 +892,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
                 <li><strong>max_side</strong> — longer-side cap (default <code>1024</code>; typical <code>512..2048</code>).</li>
                 <li><strong>feature_side</strong> — Modules 1-4 pyramid level (default <code>256</code>).</li>
                 <li><strong>pyramid</strong> — dual-scale split toggle (default <code>on</code>).</li>
-                <li><strong>score_mode</strong> — <code>sigmoid</code> (legacy, default) or <code>nll</code> (paper).</li>
+                <li><strong>score_mode</strong> — <code>sigmoid</code> (hand-calibrated, default) or <code>nll</code> (negative-log-likelihood mapping).</li>
                 <li><strong>uncertainty_weights</strong> — optional learned Cholesky <code>.pth</code>.</li>
                 <li><strong>aggregation_weights</strong> — optional MOS-tuned overrides for the 6 pipeline weights + A-DISTS sigmoid k/b.</li>
               </ul>
@@ -924,27 +924,32 @@ section.dense p, section.dense li { font-size: 0.92rem; }
               <div class="legend-corner">load_image → tensor → normalize</div>
             </div>
             <div>
-              <p>Both images are loaded to <code>(1, 3, H, W)</code> float32
-                tensors in <code>[0, 1]</code>, then resized so the longer
-                side is at most <code>max_side</code> (default 1024) using
-                <strong>Lanczos</strong>.</p>
-              <p>The pipeline then builds a <em>multi-scale pyramid</em>:</p>
+              <h4>What this stage does</h4>
+              <p>Turns two image files on disk into the exact tensor shape
+                and value range the rest of the pipeline expects. Without
+                this step VGG16 would see arbitrary pixel ranges and return
+                garbage features.</p>
+
+              <h4 style="margin-top:14px">Concretely</h4>
               <ul class="tight">
-                <li><code>ref_full</code>, <code>tgt_full</code> — native
-                  resolution, fed to the heuristics (Module 5) so 8×8 grid
-                  artefacts and edge-locked ringing aren't blurred away.</li>
-                <li><code>ref_tensor</code>, <code>tgt_tensor</code> —
-                  downsampled to <code>feature_side=256</code> for the
-                  feature branch. Matches the paper's "256 px minimum
-                  dimension" prescription.</li>
+                <li><strong>Load</strong> — decode each image, convert to
+                  RGB, scale to a <code>(1, 3, H, W)</code> tensor of
+                  <code>float32</code> values in <code>[0, 1]</code>.</li>
+                <li><strong>Resize</strong> — Lanczos-resample so the
+                  longer side is ≤ <code>max_side</code> (default 1024).
+                  Lanczos is a high-quality resampling kernel that
+                  preserves edges better than bilinear.</li>
+                <li><strong>ImageNet normalize</strong> — subtract the
+                  per-channel mean (<code>0.485, 0.456, 0.406</code>) and
+                  divide by the std (<code>0.229, 0.224, 0.225</code>).
+                  These are the exact statistics of the dataset VGG16 was
+                  trained on, so its filters fire on the right value range.</li>
               </ul>
-              <p>Then <code>Normalizer(mode="imagenet")</code> applies VGG's
-                ImageNet mean/std so Module 3's pretrained backbone sees
-                what it was trained on.</p>
-              <div class="caption">
+              <div class="caption" style="margin-top:14px">
                 Mismatched ref/tgt sizes? Downsample the larger; never
-                upsample. Bilinear-up to ref-size was silently injecting blur
-                into the target — a regression caught and fixed in T7.
+                upsample. Bilinear-upsampling to ref-size was silently
+                injecting blur into the target and triggering false "blur"
+                severity on identical-content pairs.
               </div>
             </div>
           </div>
@@ -955,19 +960,20 @@ section.dense p, section.dense li { font-size: 0.92rem; }
           <div class="eyebrow">Algorithm · pyramid</div>
           <h2 class="section-title">Two scales, one pipeline.</h2>
 
-          <p>The original UPIQAL paper prescribes a 256-pixel feature scale,
-            but blocking grids and edge-locked ringing only exist at native
-            resolution — downsample them and they vanish. So the pipeline
-            splits across two scales:</p>
+          <p>The deep-feature modules want a 256-pixel feature scale —
+            VGG16's filter sizes are tuned to that range, and any larger
+            input gets very slow on CPU. But blocking grids and
+            edge-locked ringing only exist at native resolution — downsample
+            them and they vanish. So the pipeline splits across two scales:</p>
 
           <div class="card-grid cols-2">
             <div class="card">
               <h4>Feature branch · ~256 px longer side</h4>
               <p class="lede">
                 Modules 1-4 (normalize · chromatic transport · deep
-                statistics · uncertainty). VGG16 stays fast, A-DISTS sees
-                paper-matched spatial frequencies, Sinkhorn EMD finishes
-                in milliseconds.
+                statistics · uncertainty). VGG16 stays fast, the feature
+                filters fire on the spatial frequencies they were trained
+                on, Sinkhorn EMD finishes in milliseconds.
               </p>
             </div>
             <div class="card">
@@ -998,20 +1004,37 @@ section.dense p, section.dense li { font-size: 0.92rem; }
 
           <div class="stage-grid">
             <div>
-              <p>The <code>ChromaticTransportEvaluator</code> computes an
-                <strong>Earth Mover's Distance</strong> between the local Oklab
-                colour distributions of reference and target — patch by patch,
-                16-pixel windows, with 20 Sinkhorn iterations.</p>
-              <div class="formula">
+              <h4>What this stage does</h4>
+              <p>Asks at every region of the image: "how much would I have
+                to rearrange the colours in <em>ref</em> to make them look
+                like <em>tgt</em>?" Big rearrangement cost = strong colour
+                shift at that location.</p>
+
+              <h4 style="margin-top:14px">Key building blocks</h4>
+              <ul class="tight">
+                <li><strong>Oklab</strong> — a colour space where the
+                  numeric distance between two colours actually matches how
+                  different they look to a human eye. (RGB doesn't — two
+                  RGB values that differ by the same number can look very
+                  different.)</li>
+                <li><strong>Earth Mover's Distance (EMD)</strong> — a
+                  measure of how much "work" it takes to morph one pile
+                  of colour samples into another, treating each pixel as a
+                  bit of mass that has to be moved to a new location in
+                  colour space.</li>
+                <li><strong>Sinkhorn iterations</strong> — a fast
+                  approximation of EMD (20 rounds here) that finishes in
+                  milliseconds instead of seconds. The trade-off: a small
+                  positive bias even when the two distributions are
+                  identical.</li>
+              </ul>
+
+              <div class="formula" style="margin-top:14px">
                 <span class="op">color_map</span> = EMD<sub>oklab</sub>(ref, tgt) <span class="op">−</span> EMD<sub>oklab</sub>(ref, ref)
               </div>
-              <p>The second term is the <strong>self-transport baseline</strong>.
-                Sinkhorn-regularised EMD is non-zero even for identical
-                distributions — subtracting <em>ref→ref</em> removes that bias
-                so identical inputs yield a clean zero map.</p>
               <p class="caption">
-                Oklab is perceptually uniform; that's why the EMD lands closer
-                to "looks different" than RGB-space distance would.
+                Subtracting <em>ref → ref</em> cancels Sinkhorn's bias term
+                so identical inputs yield a clean zero map.
               </p>
             </div>
             <div class="heat color-emd">
@@ -1024,30 +1047,55 @@ section.dense p, section.dense li { font-size: 0.92rem; }
         <!-- ============================================ -->
         <section class="dense">
           <div class="eyebrow">Compare · 3 / 5</div>
-          <h2 class="section-title"><span class="num-chip">M3</span>Deep statistics — A-DISTS over VGG16</h2>
+          <h2 class="section-title"><span class="num-chip">M3</span>Deep statistics &mdash; perceptual similarity via VGG16</h2>
 
           <div class="stage-grid">
             <div>
-              <p>The biggest box. A pretrained VGG16 walks both normalised
-                images and at every stage returns three maps:</p>
+              <h4>What this stage does</h4>
+              <p>Runs both images through a vision neural network and asks
+                "do they activate the same filters at the same locations?"
+                Higher agreement = the images look more alike to a model
+                that has been trained on millions of natural photos.</p>
+
+              <h4 style="margin-top:14px">Key building blocks</h4>
               <ul class="tight">
-                <li><code>l(x,y)</code> — <em>luminance / first-order</em>
-                  similarity (channel means).</li>
-                <li><code>s(x,y)</code> — <em>structure / texture</em>
-                  similarity (channel covariances).</li>
-                <li><code>p_tex(x,y)</code> — a learned
-                  <em>texture-probability</em> gate.</li>
+                <li><strong>VGG16</strong> &mdash; a 16-layer convolutional
+                  neural network released by Oxford in 2014, pretrained on
+                  ImageNet (1.3 M photos, 1000 categories). Its early
+                  filters detect edges and colour blobs; mid layers
+                  detect textures; later layers detect object parts.</li>
+                <li><strong>"Stage"</strong> here = one of the 5 conv blocks
+                  inside VGG16. After every block the resolution halves and
+                  the channel count doubles. We tap all 5.</li>
+                <li><strong>Feature map</strong> &mdash; the output of one
+                  block: a stack of <code>C</code> grids of size
+                  <code>H&times;W</code>, where each channel reports how
+                  strongly its filter fired at every spatial location.</li>
               </ul>
-              <div class="formula">
-                <span class="var">score</span> = (1 − <span class="var">p_tex</span>) · <span class="var">l</span> + <span class="var">p_tex</span> · <span class="var">s</span>
+
+              <h4 style="margin-top:14px">The three per-pixel maps</h4>
+              <ul class="tight">
+                <li><code>l(x,y)</code> &mdash; compares the <em>mean</em>
+                  channel response between ref and tgt. Captures
+                  "brightness / first-order" agreement (good for smooth
+                  regions like skies).</li>
+                <li><code>s(x,y)</code> &mdash; compares the <em>variance
+                  &amp; covariance</em> of channel responses. Captures
+                  "structure / texture" agreement (good for grass, fabric,
+                  fine detail).</li>
+                <li><code>p_tex(x,y)</code> &mdash; a learned weight
+                  &isin; <code>[0, 1]</code> saying "how textured is this
+                  region?"</li>
+              </ul>
+
+              <div class="formula" style="margin-top:10px">
+                <span class="var">score</span> = (1 &minus; <span class="var">p_tex</span>) &middot; <span class="var">l</span> + <span class="var">p_tex</span> &middot; <span class="var">s</span>
               </div>
-              <p>So smooth regions weight the luminance term; textured
-                regions weight the structure term — adaptive DISTS, paper-
-                faithful. Maps are bilinearly upsampled to <code>(H, W)</code>
-                and averaged across layers to produce <code>deep_sim</code>:
-                high = visually similar.</p>
-              <p>Also yields <code>residuals</code> — per-layer feature
-                differences fed straight into Module 4.</p>
+              <p class="caption">
+                Averaged across all 5 VGG stages this becomes
+                <code>deep_sim</code>. The per-layer feature differences
+                are also handed off to Module 4 as <code>residuals</code>.
+              </p>
             </div>
             <div class="heat structure">
               <div class="legend-corner">structural_similarity_map.png</div>
@@ -1066,22 +1114,40 @@ section.dense p, section.dense li { font-size: 0.92rem; }
               <div class="legend-corner">global_anomaly_map.png</div>
             </div>
             <div>
-              <p>The <code>ProbabilisticUncertaintyMapper</code> consumes the
-                VGG residuals and projects them through a learned
-                <em>block-diagonal Cholesky factor</em>
-                (<code>weights/L_cholesky_blockdiag.pth</code>).</p>
-              <div class="formula">
-                <span class="var">anomaly(x,y)</span> = ‖ L<sup>⊤</sup> · residual(x,y) ‖² &nbsp;<span class="op">→</span>&nbsp; Mahalanobis distance
-              </div>
-              <p>Pixels where the residual lies <em>outside</em> the learned
-                feature covariance light up. The output is upsampled to
-                <code>(H, W)</code>, normalised by per-sample peak (with a
-                safe-divide guard for near-identical inputs), and saved as
-                the <strong>global anomaly map</strong> — the catch-all
+              <h4>What this stage does</h4>
+              <p>Takes the per-pixel feature differences produced by
+                Module 3 and asks "given a learned model of <em>normal</em>
+                differences, is this pixel surprising?" The output is the
+                <strong>global anomaly map</strong> &mdash; the catch-all
                 "something's off here" channel.</p>
+
+              <h4 style="margin-top:14px">Key building blocks</h4>
+              <ul class="tight">
+                <li><strong>Residual</strong> &mdash; the difference vector
+                  between ref and tgt VGG features at one spatial location.
+                  Dozens of numbers per pixel.</li>
+                <li><strong>Mahalanobis distance</strong> &mdash; like
+                  Euclidean distance, but it accounts for the fact that
+                  some feature channels naturally vary together. A residual
+                  vector that aligns with the usual correlations counts as
+                  "small"; one that breaks them counts as "large".</li>
+                <li><strong>Cholesky factor (L)</strong> &mdash; a matrix
+                  trained offline so that <code>L&middot;L<sup>&top;</sup></code>
+                  equals the inverse covariance of normal residuals.
+                  Applying <code>L<sup>&top;</sup></code> to a residual
+                  rescales it into a uniform "is this surprising?" space.</li>
+                <li><strong>Block-diagonal</strong> &mdash; instead of one
+                  huge covariance matrix, train one smaller matrix per
+                  VGG block. Much faster to fit and apply.</li>
+              </ul>
+
+              <div class="formula" style="margin-top:10px">
+                <span class="var">anomaly(x,y)</span> = &Vert; L<sup>&top;</sup> &middot; residual(x,y) &Vert;<sup>2</sup>
+              </div>
               <p class="caption">
-                Without trained weights, the mapper falls back to identity
-                diagonal. Anomalies still localise, just less sharply.
+                Without trained weights the mapper falls back to identity
+                (Mahalanobis collapses to plain Euclidean) &mdash; anomalies
+                still localise, just less sharply.
               </p>
             </div>
           </div>
@@ -1095,28 +1161,48 @@ section.dense p, section.dense li { font-size: 0.92rem; }
 
           <div class="stage-grid">
             <div>
-              <p>The only module that runs on the <strong>full-resolution</strong>
-                pixels (Phase 1 of the paper) — JPEG blocks and ringing live
-                at native scale.</p>
+              <h4>What this stage does</h4>
+              <p>Looks directly at the pixels &mdash; not VGG features
+                &mdash; for four well-defined, classical compression and
+                capture artefacts. This is the only module that runs at
+                <strong>full resolution</strong>, because the artefacts it
+                hunts for live at native scale and would disappear under
+                downsampling.</p>
 
-              <div class="legend">
-                <span class="chip"><span class="sw ringing"></span>Gibbs ringing</span>
-                <span class="chip"><span class="sw noise"></span>Gaussian noise</span>
-                <span class="chip"><span class="sw blur"></span>Blur / detail loss</span>
-                <span class="chip"><span class="sw color"></span>Color shift</span>
+              <h4 style="margin-top:14px">The four detectors</h4>
+              <ul class="tight">
+                <li><strong>JPEG blocking</strong> &mdash; JPEG encodes
+                  images in 8&times;8 blocks via the Discrete Cosine
+                  Transform (DCT). Heavy compression leaves a faint grid.
+                  The detector measures pixel-energy spikes at exactly that
+                  8-pixel phase.</li>
+                <li><strong>Gibbs ringing</strong> &mdash; wave-like
+                  "halos" near sharp edges, produced when high-frequency
+                  detail is truncated. Detected via wavelet-domain energy
+                  in a band around every strong edge.</li>
+                <li><strong>Gaussian noise</strong> &mdash; the random
+                  speckle from a sensor or aggressive denoiser. Measured as
+                  the standard deviation of the wavelet residual (the
+                  high-frequency leftover after smoothing).</li>
+                <li><strong>Blur / detail loss</strong> &mdash; how soft
+                  the edges have become. Measured by the
+                  <em>edge-spread function</em>: how many pixels wide is the
+                  transition across each edge?</li>
+              </ul>
+
+              <div class="legend" style="margin-top:14px">
+                <span class="chip"><span class="sw ringing"></span>Ringing</span>
+                <span class="chip"><span class="sw noise"></span>Noise</span>
+                <span class="chip"><span class="sw blur"></span>Blur</span>
+                <span class="chip"><span class="sw color"></span>Color (M2)</span>
                 <span class="chip"><span class="sw anomaly"></span>Anomaly (M4)</span>
                 <span class="chip"><span class="sw structure"></span>Structure (M3)</span>
               </div>
-
-              <ul class="tight" style="margin-top:18px">
-                <li>JPEG blocking — DCT grid energy at the 8-pixel phase.</li>
-                <li>Ringing — wavelet-domain energy near strong edges.</li>
-                <li>Noise — wavelet residual standard deviation.</li>
-                <li>Blur — edge-spread function width.</li>
-              </ul>
               <p class="caption">
-                Masks are then downsampled to the pipeline resolution and
-                merged into the 7-channel diagnostic tensor.
+                Each detector outputs a per-pixel severity mask. All four
+                are downsampled to the pipeline resolution and merged into
+                the 7-channel diagnostic tensor along with the M2 / M3 / M4
+                maps.
               </p>
             </div>
             <div class="heat heuristics">
@@ -1162,7 +1248,7 @@ section.dense p, section.dense li { font-size: 0.92rem; }
             </div>
             <div>
               <p>An optional <code>--score-mode nll</code> swaps the sigmoid
-                for the paper's negative-log-likelihood mapping:</p>
+                for a negative-log-likelihood mapping:</p>
               <div class="formula" style="font-size:0.85rem">
                 <span class="var">final</span> = exp( <span class="op">−</span> <span class="w">10</span> · total_nll )
               </div>
