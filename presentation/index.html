@@ -750,9 +750,17 @@ ul.tight li::marker { color: var(--u-accent); }
   transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
 }
 
-/* Make sure first slide doesn't overlap chrome */
+/* Make sure slide content clears the fixed app-chrome (44px tall).
+   Padding on .slides alone is ignored by Reveal's absolute positioning,
+   so apply it per-section. Title slides use flex centering inside their
+   own wrapper, so the extra top padding just trims a few px from the
+   centring envelope and remains visually balanced. */
 .reveal .slides {
   padding-top: 30px;
+}
+.reveal .slides > section {
+  padding-top: 56px;
+  box-sizing: border-box;
 }
 
 /* Smaller body text on dense slides */
